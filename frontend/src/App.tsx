@@ -1,5 +1,6 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from 'react';
 import './App.css';
+import {Input} from './Input';
 import {AddUser, FetchFeed, GetSettings, RemoveUser, SetToken} from '../wailsjs/go/main/App';
 import {feed, main} from '../wailsjs/go/models';
 import {BrowserOpenURL} from '../wailsjs/runtime/runtime';
@@ -76,7 +77,7 @@ function TokenSetup({
                         : 'Enter a GitHub personal access token to get started.'}{' '}
                     A fine-grained token with no extra permissions is enough for public activity.
                 </p>
-                <input
+                <Input
                     type="password"
                     placeholder="github_pat_... / ghp_..."
                     value={token}
@@ -237,7 +238,7 @@ export default function App() {
                 <aside className="sidebar">
                     <h2>Following</h2>
                     <form className="add-user" onSubmit={addUser}>
-                        <input
+                        <Input
                             placeholder="Add a username"
                             value={newUser}
                             onChange={(e) => setNewUser(e.target.value)}
