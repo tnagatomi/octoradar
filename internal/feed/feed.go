@@ -41,9 +41,22 @@ type Result struct {
 }
 
 // Fetch retrieves events for all usernames concurrently and merges them
-// into a single timeline, newest first. Only event types with a mapping
-// in newItem appear in the result.
+// into a single timeline, newest first, including merged pull requests
+// authored by the users. Only event types with a mapping in newItem appear
+// in the result.
 func Fetch(ctx context.Context, client *github.Client, usernames []string) Result {
+	return fetch(ctx, client, usernames, true)
+}
+
+// FetchEvents is like Fetch but omits the merged pull request search. It is
+// used for incremental single-user updates where the search API quota is the
+// scarcest, so adding a user costs just one events request; the next full
+// Fetch fills in any merged pull requests.
+func FetchEvents(ctx context.Context, client *github.Client, usernames []string) Result {
+	return fetch(ctx, client, usernames, false)
+}
+
+func fetch(ctx context.Context, client *github.Client, usernames []string, includeMergedPRs bool) Result {
 	var (
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -73,7 +86,7 @@ func Fetch(ctx context.Context, client *github.Client, usernames []string) Resul
 			}
 		}()
 	}
-	if len(usernames) > 0 {
+	if includeMergedPRs && len(usernames) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

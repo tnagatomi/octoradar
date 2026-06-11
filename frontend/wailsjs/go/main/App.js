@@ -10,6 +10,10 @@ export function FetchFeed() {
   return window['go']['main']['App']['FetchFeed']();
 }
 
+export function FetchUserFeed(arg1) {
+  return window['go']['main']['App']['FetchUserFeed'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
