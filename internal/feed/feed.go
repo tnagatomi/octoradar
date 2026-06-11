@@ -134,7 +134,8 @@ func newItem(ev github.Event) (Item, bool) {
 				HTMLURL string `json:"html_url"`
 			} `json:"release"`
 		}
-		json.Unmarshal(ev.Payload, &p)
+		// A malformed payload degrades gracefully to the fallbacks below.
+		_ = json.Unmarshal(ev.Payload, &p)
 		item.Action = "released"
 		item.Target = ev.Repo.Name
 		item.TargetURL = cmp.Or(p.Release.HTMLURL, repoURL)
@@ -152,7 +153,8 @@ func newItem(ev github.Event) (Item, bool) {
 		var p struct {
 			RefType string `json:"ref_type"`
 		}
-		json.Unmarshal(ev.Payload, &p)
+		// A malformed payload degrades gracefully to the fallbacks below.
+		_ = json.Unmarshal(ev.Payload, &p)
 		if p.RefType != "repository" {
 			return Item{}, false
 		}
@@ -169,7 +171,8 @@ func newItem(ev github.Event) (Item, bool) {
 				} `json:"sponsorable"`
 			} `json:"sponsorship"`
 		}
-		json.Unmarshal(ev.Payload, &p)
+		// A malformed payload degrades gracefully to the fallbacks below.
+		_ = json.Unmarshal(ev.Payload, &p)
 		item.Action = "sponsored"
 		if login := p.Sponsorship.Sponsorable.Login; login != "" {
 			item.Target = login
