@@ -1,0 +1,84 @@
+/*
+ * Color tokens follow GitHub's open-source Primer Primitives light theme
+ * (MIT-licensed design tokens) so the UI feels native to GitHub without
+ * copying any proprietary stylesheet. Dark theme is intentionally not
+ * supported yet.
+ */
+:root {
+    /* Canvas / surfaces */
+    --bg: #ffffff;
+    --canvas-inset: #f6f8fa;
+    --panel: #f6f8fa;
+    --overlay: #ffffff;
+
+    /* Borders */
+    --border: #d0d7de;
+    --border-muted: #d8dee4;
+
+    /* Foreground text */
+    --text: #1f2328;
+    --muted: #59636e;
+    --subtle: #6e7781;
+
+    /* Accents */
+    --accent: #0969da;
+    --accent-emphasis: #0969da;
+
+    /* Success (primary action) */
+    --green: #1f883d;
+    --green-hover: #1a7f37;
+    --green-active: #187733;
+
+    /* Danger */
+    --red: #cf222e;
+    --danger-emphasis: #cf222e;
+
+    /* Buttons */
+    --btn-bg: #f6f8fa;
+    --btn-hover-bg: #eff2f5;
+    --btn-active-bg: #ebecf0;
+    --btn-border: rgba(31, 35, 40, 0.15);
+    --btn-primary-border: rgba(31, 35, 40, 0.15);
+
+    /* Focus ring */
+    --focus-ring: rgba(9, 105, 218, 0.3);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+        Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+button {
+    font: inherit;
+    cursor: pointer;
+}
+
+input {
+    font: inherit;
+}
