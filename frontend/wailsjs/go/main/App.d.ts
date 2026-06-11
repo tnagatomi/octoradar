@@ -7,6 +7,8 @@ export function AddUser(arg1:string):Promise<main.Settings>;
 
 export function FetchFeed():Promise<feed.Result>;
 
+export function FetchUserFeed(arg1:string):Promise<feed.Result>;
+
 export function GetSettings():Promise<main.Settings>;
 
 export function RemoveUser(arg1:string):Promise<main.Settings>;

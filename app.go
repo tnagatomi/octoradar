@@ -85,9 +85,15 @@ func (a *App) SetToken(token string) (string, error) {
 // secondary concurrency limit.
 const maxUsers = 50
 
+// normalizeUsername trims surrounding whitespace and an optional leading "@"
+// so the same login reaches both AddUser and FetchUserFeed unchanged.
+func normalizeUsername(username string) string {
+	return strings.TrimPrefix(strings.TrimSpace(username), "@")
+}
+
 // AddUser verifies the username exists and adds it to the followed list.
 func (a *App) AddUser(username string) (Settings, error) {
-	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	username = normalizeUsername(username)
 	if username == "" {
 		return a.GetSettings(), fmt.Errorf("username is empty")
 	}
@@ -140,4 +146,18 @@ func (a *App) FetchFeed() feed.Result {
 	a.mu.Unlock()
 
 	return feed.Fetch(a.ctx, github.NewClient(token), users)
+}
+
+// FetchUserFeed fetches the latest events for a single user. The frontend
+// merges the result into the existing feed when a user is added, so adding a
+// user costs a single events request instead of a full refresh across
+// everyone. Merged pull requests are intentionally skipped here to spare the
+// scarce search API quota; the next full FetchFeed surfaces them.
+func (a *App) FetchUserFeed(username string) feed.Result {
+	username = normalizeUsername(username)
+	a.mu.Lock()
+	token := a.cfg.Token
+	a.mu.Unlock()
+
+	return feed.FetchEvents(a.ctx, github.NewClient(token), []string{username})
 }
