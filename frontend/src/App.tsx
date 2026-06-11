@@ -17,6 +17,10 @@ function relativeTime(value: any): string {
     return date.toLocaleDateString();
 }
 
+function absoluteTime(value: any): string {
+    return new Date(value).toLocaleString();
+}
+
 function ExternalLink({href, className, children}: {href: string; className?: string; children: ReactNode}) {
     return (
         <a
@@ -122,7 +126,7 @@ function FeedItem({item}: {item: feed.Item}) {
                 </div>
                 <div className="feed-meta">
                     <span className="type-icon">{typeIcons[item.type] ?? ''}</span>
-                    <span className="time">{relativeTime(item.createdAt)}</span>
+                    <span className="time" title={absoluteTime(item.createdAt)}>{relativeTime(item.createdAt)}</span>
                 </div>
             </div>
         </li>
