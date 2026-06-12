@@ -13,7 +13,7 @@ Download the latest build for your platform from the [Releases page](https://git
 The `.dmg` ships a universal build for both Apple Silicon and Intel.
 
 1. Open the `.dmg` and drag **Octoradar** into **Applications**.
-2. The app is ad-hoc signed but not notarized, so the first launch is blocked by Gatekeeper. Right-click **Octoradar** in Applications, choose **Open**, then confirm **Open** in the dialog. You only need to do this once.
+2. The app is ad-hoc signed but not notarized, so the first launch is blocked by Gatekeeper. Double-click **Octoradar** once (it will be blocked), then open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the Octoradar message. You only need to do this once.
 
    Alternatively, clear the quarantine flag from a terminal:
 
