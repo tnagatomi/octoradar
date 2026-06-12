@@ -5,6 +5,28 @@ import (
 	"time"
 )
 
+func TestBuildQuery(t *testing.T) {
+	now := time.Date(2026, 6, 13, 9, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		period   string
+		language string
+		want     string
+	}{
+		{name: "no language", period: "week", language: "", want: "created:>=2026-06-06"},
+		{name: "with language", period: "week", language: "go", want: "created:>=2026-06-06 language:go"},
+		{name: "blank language omitted", period: "month", language: "  ", want: "created:>=2026-05-14"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildQuery(now, tt.period, tt.language)
+			if got != tt.want {
+				t.Errorf("buildQuery(%q, %q) = %q, want %q", tt.period, tt.language, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWindowStart(t *testing.T) {
 	now := time.Date(2026, 6, 13, 9, 30, 0, 0, time.UTC)
 	tests := []struct {

@@ -4,7 +4,11 @@
 // labels map to practical creation windows rather than literal day counts.
 package discover
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // windowDays maps a period to the number of days back its "created since"
 // boundary reaches. The windows are wider than their labels suggest because a
@@ -18,6 +22,18 @@ var windowDays = map[string]int{
 }
 
 const defaultWindowDays = 30
+
+// buildQuery assembles the search query for trending repositories: those
+// created since the period's window boundary, optionally restricted to a
+// single language. Sorting by stars is applied by the client, not here. A
+// blank language is omitted so the search spans all languages.
+func buildQuery(now time.Time, period, language string) string {
+	query := fmt.Sprintf("created:>=%s", windowStart(now, period).Format("2006-01-02"))
+	if lang := strings.TrimSpace(language); lang != "" {
+		query += " language:" + lang
+	}
+	return query
+}
 
 // windowStart returns the lower bound for a repository's creation date given
 // the requested period, relative to now.
