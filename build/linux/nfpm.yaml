@@ -1,0 +1,37 @@
+# nfpm configuration for building Octoradar .deb and .rpm packages.
+# VERSION is supplied by the release workflow via the environment.
+# See https://nfpm.goreleaser.com/configuration/
+name: octoradar
+arch: amd64
+platform: linux
+version: ${VERSION}
+maintainer: Takayuki Nagatomi <tnagatomi@okweird.net>
+description: Monitor GitHub activity from your desktop.
+homepage: https://github.com/tnagatomi/octoradar
+license: MIT
+section: net
+priority: optional
+
+contents:
+  - src: ./build/bin/octoradar
+    dst: /usr/bin/octoradar
+  - src: ./build/linux/octoradar.desktop
+    dst: /usr/share/applications/octoradar.desktop
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/octoradar.png
+
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.1-0
+    recommends:
+      # The GitHub token is stored via the Secret Service API, which needs a
+      # running keyring daemon. gnome-keyring is the common provider.
+      - gnome-keyring
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+    recommends:
+      - gnome-keyring

@@ -3,7 +3,8 @@
   "name": "octoradar",
   "outputfilename": "octoradar",
   "info": {
-    "productName": "Octoradar"
+    "productName": "Octoradar",
+    "productVersion": "0.0.0"
   },
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm build",

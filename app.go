@@ -46,6 +46,11 @@ type Settings struct {
 	Users    []string `json:"users"`
 }
 
+// Version returns the application version shown in the UI.
+func (a *App) Version() string {
+	return version
+}
+
 // GetSettings returns the current settings.
 func (a *App) GetSettings() Settings {
 	a.mu.Lock()

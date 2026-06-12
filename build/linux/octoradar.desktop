@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Octoradar
+Comment=Monitor GitHub activity from your desktop
+Exec=octoradar
+Icon=octoradar
+Terminal=false
+Categories=Development;Network;
+StartupWMClass=octoradar
