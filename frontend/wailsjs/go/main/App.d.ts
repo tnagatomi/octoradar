@@ -5,6 +5,8 @@ import {feed} from '../models';
 
 export function AddUser(arg1:string):Promise<main.Settings>;
 
+export function CancelDeviceLogin():Promise<void>;
+
 export function CompleteDeviceLogin(arg1:string,arg2:number,arg3:number):Promise<string>;
 
 export function FetchFeed():Promise<feed.Result>;

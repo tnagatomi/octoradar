@@ -1,7 +1,7 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from 'react';
 import './App.css';
 import {Input} from './Input';
-import {AddUser, CompleteDeviceLogin, FetchFeed, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
+import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
 import {feed, main} from '../wailsjs/go/models';
 import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
 import {runDeviceLogin} from './deviceLogin';
@@ -53,6 +53,14 @@ function TokenSetup({
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState(false);
+
+    // Stop any in-progress poll when the sign-in screen goes away, so the
+    // backend does not keep waiting after the user backs out.
+    useEffect(() => {
+        return () => {
+            CancelDeviceLogin();
+        };
+    }, []);
 
     const copyCode = async () => {
         if (!prompt) return;

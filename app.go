@@ -19,6 +19,9 @@ type App struct {
 
 	mu  sync.Mutex
 	cfg *config.Config
+	// cancelLogin stops the in-progress device login poll, if any. It is set
+	// while CompleteDeviceLogin is waiting and cleared when it returns.
+	cancelLogin context.CancelFunc
 }
 
 // NewApp creates a new App application struct.
@@ -116,7 +119,19 @@ func (a *App) CompleteDeviceLogin(deviceCode string, interval, expiresIn int) (s
 	if err != nil {
 		return "", err
 	}
-	token, err := oauth.NewClient(clientID).PollAccessToken(a.ctx, &oauth.DeviceCode{
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.mu.Lock()
+	a.cancelLogin = cancel
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.cancelLogin = nil
+		a.mu.Unlock()
+		cancel()
+	}()
+
+	token, err := oauth.NewClient(clientID).PollAccessToken(ctx, &oauth.DeviceCode{
 		DeviceCode: deviceCode,
 		Interval:   interval,
 		ExpiresIn:  expiresIn,
@@ -125,6 +140,17 @@ func (a *App) CompleteDeviceLogin(deviceCode string, interval, expiresIn int) (s
 		return "", err
 	}
 	return a.validateAndSaveToken(token)
+}
+
+// CancelDeviceLogin stops an in-progress device login poll, if any, so the
+// backend stops waiting once the user backs out of the sign-in screen.
+func (a *App) CancelDeviceLogin() {
+	a.mu.Lock()
+	cancel := a.cancelLogin
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // maxUsers caps the followed user list. Every refresh fans out one events
