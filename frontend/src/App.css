@@ -199,6 +199,40 @@ button:focus-visible {
     overflow-y: auto;
     padding: 24px;
     background-color: var(--canvas-inset);
+    /* We restore scroll position explicitly, so disable the browser's own
+       scroll anchoring to avoid it fighting our jumps when items prepend. */
+    overflow-anchor: none;
+}
+
+/*
+ * "N new" badge. The rail is a zero-height sticky layer so the badge floats over
+ * the top of the feed without shifting the list (which would throw off our
+ * scroll restoration).
+ */
+.new-badge-rail {
+    position: sticky;
+    top: 0;
+    height: 0;
+    z-index: 1;
+    overflow: visible;
+    text-align: center;
+}
+
+.new-badge {
+    position: relative;
+    top: 12px;
+    padding: 5px 14px;
+    border: 1px solid var(--btn-primary-border);
+    border-radius: 999px;
+    background-color: var(--green);
+    color: #fff;
+    font-weight: 500;
+    font-size: 13px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.new-badge:hover {
+    background-color: var(--green-hover);
 }
 
 /* Feed list sits in a bordered white card, like a Primer Box. */
