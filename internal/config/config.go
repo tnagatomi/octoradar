@@ -12,9 +12,10 @@ import (
 )
 
 // Config holds the persisted application settings. The token lives in the
-// OS keychain; only the non-secret follow list is written to disk.
+// OS keychain; the non-secret login and follow list are written to disk.
 type Config struct {
 	Token string   `json:"-"`
+	Login string   `json:"login"`
 	Users []string `json:"users"`
 }
 
@@ -91,12 +92,13 @@ func loadLegacy() (*Config, error) {
 func fromFile(data []byte) (*Config, error) {
 	var file struct {
 		Token string   `json:"token"`
+		Login string   `json:"login"`
 		Users []string `json:"users"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, err
 	}
-	cfg := &Config{Users: file.Users}
+	cfg := &Config{Login: file.Login, Users: file.Users}
 
 	token, err := keyring.Get(keyringService, keyringUser)
 	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
