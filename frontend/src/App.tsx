@@ -3,7 +3,7 @@ import './App.css';
 import {Input} from './Input';
 import {AddUser, CompleteDeviceLogin, FetchFeed, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
 import {feed, main} from '../wailsjs/go/models';
-import {BrowserOpenURL} from '../wailsjs/runtime/runtime';
+import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
 import {runDeviceLogin} from './deviceLogin';
 
 function relativeTime(value: any): string {
@@ -52,11 +52,19 @@ function TokenSetup({
     const [prompt, setPrompt] = useState<main.DeviceLogin | null>(null);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const copyCode = async () => {
+        if (!prompt) return;
+        await ClipboardSetText(prompt.userCode);
+        setCopied(true);
+    };
 
     const signIn = async () => {
         setBusy(true);
         setError('');
         setPrompt(null);
+        setCopied(false);
         try {
             await runDeviceLogin(
                 {start: StartDeviceLogin, complete: CompleteDeviceLogin, openURL: BrowserOpenURL},
@@ -88,7 +96,12 @@ function TokenSetup({
                             In the browser window that opened, enter this code at{' '}
                             <ExternalLink href={prompt.verificationUri}>{prompt.verificationUri}</ExternalLink>:
                         </p>
-                        <div className="device-code">{prompt.userCode}</div>
+                        <div className="device-code-row">
+                            <div className="device-code">{prompt.userCode}</div>
+                            <button type="button" className="secondary copy" onClick={copyCode}>
+                                {copied ? 'Copied' : 'Copy'}
+                            </button>
+                        </div>
                         <p className="hint">Waiting for authorization…</p>
                     </div>
                 ) : (

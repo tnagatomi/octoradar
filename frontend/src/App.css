@@ -358,7 +358,14 @@ button:focus-visible {
     gap: 12px;
 }
 
+.device-code-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
 .device-code {
+    flex: 1;
     padding: 12px;
     text-align: center;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
