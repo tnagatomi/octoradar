@@ -29,7 +29,7 @@ export function FeedView({
     fetchErrors: string[];
     unauthorized: boolean;
     onReauthenticate: () => void;
-    feedRef: RefObject<HTMLElement>;
+    feedRef: RefObject<HTMLElement | null>;
     newCount: number;
     onScroll: () => void;
     onJumpToTop: () => void;
