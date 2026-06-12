@@ -20,6 +20,9 @@ type Client struct {
 	httpClient *http.Client
 	baseURL    string
 	clientID   string
+	// after waits for d or until ctx is cancelled, returning ctx.Err() on
+	// cancellation. It is a field so tests can wait instantly.
+	after func(ctx context.Context, d time.Duration) error
 }
 
 // NewClient returns a device-flow client for the given OAuth app client ID.
@@ -28,6 +31,19 @@ func NewClient(clientID string) *Client {
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		baseURL:    defaultBaseURL,
 		clientID:   clientID,
+		after:      sleep,
+	}
+}
+
+// sleep waits for d or until ctx is cancelled.
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -72,6 +88,34 @@ func (c *Client) RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 }
 
 const grantTypeDeviceCode = "urn:ietf:params:oauth:grant-type:device_code"
+
+// PollAccessToken blocks until the user authorizes the device and returns
+// the resulting user access token, or fails if authorization is denied, the
+// code expires, or ctx is cancelled. It honors the server's polling
+// interval, backing off further whenever the server asks it to slow down.
+func (c *Client) PollAccessToken(ctx context.Context, dc *DeviceCode) (string, error) {
+	interval := time.Duration(max(dc.Interval, 1)) * time.Second
+	remaining := time.Duration(dc.ExpiresIn) * time.Second
+	for {
+		token, slowDown, err := c.pollOnce(ctx, dc.DeviceCode)
+		if err != nil {
+			return "", err
+		}
+		if token != "" {
+			return token, nil
+		}
+		if slowDown {
+			interval += 5 * time.Second
+		}
+		if remaining <= 0 {
+			return "", fmt.Errorf("device authorization timed out")
+		}
+		if err := c.after(ctx, interval); err != nil {
+			return "", err
+		}
+		remaining -= interval
+	}
+}
 
 // pollOnce performs one token-exchange request. A non-empty token means
 // authorization succeeded. A nil error with an empty token means the user

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // newTestClient returns a client whose requests are routed to handler.
@@ -144,6 +145,84 @@ func TestPollOnceTerminalError(t *testing.T) {
 				t.Fatalf("%s must be terminal, got nil error", code)
 			}
 		})
+	}
+}
+
+func TestPollAccessTokenPendingThenSuccess(t *testing.T) {
+	var calls int
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"gho_token"}`))
+	})
+	c.after = func(context.Context, time.Duration) error { return nil }
+
+	token, err := c.PollAccessToken(context.Background(), &DeviceCode{DeviceCode: "dev-abc", Interval: 5, ExpiresIn: 900})
+	if err != nil {
+		t.Fatalf("PollAccessToken: %v", err)
+	}
+	if token != "gho_token" {
+		t.Errorf("token = %q, want gho_token", token)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2 (one pending, one success)", calls)
+	}
+}
+
+func TestPollAccessTokenSlowDownIncreasesInterval(t *testing.T) {
+	var calls int
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"error":"slow_down","interval":10}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"gho_token"}`))
+	})
+	var waited []time.Duration
+	c.after = func(_ context.Context, d time.Duration) error {
+		waited = append(waited, d)
+		return nil
+	}
+
+	if _, err := c.PollAccessToken(context.Background(), &DeviceCode{DeviceCode: "dev-abc", Interval: 5, ExpiresIn: 900}); err != nil {
+		t.Fatalf("PollAccessToken: %v", err)
+	}
+	if len(waited) != 1 {
+		t.Fatalf("after called %d times, want 1", len(waited))
+	}
+	// Base interval 5s plus the 5s slow_down penalty.
+	if waited[0] != 10*time.Second {
+		t.Errorf("wait = %v, want 10s after slow_down", waited[0])
+	}
+}
+
+func TestPollAccessTokenTimesOut(t *testing.T) {
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+	})
+	c.after = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := c.PollAccessToken(context.Background(), &DeviceCode{DeviceCode: "dev-abc", Interval: 5, ExpiresIn: 5}); err == nil {
+		t.Fatal("expected timeout error when the code expires, got nil")
+	}
+}
+
+func TestPollAccessTokenCancelled(t *testing.T) {
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+	})
+	c.after = func(context.Context, time.Duration) error { return context.Canceled }
+
+	if _, err := c.PollAccessToken(context.Background(), &DeviceCode{DeviceCode: "dev-abc", Interval: 5, ExpiresIn: 900}); err == nil {
+		t.Fatal("expected cancellation error, got nil")
 	}
 }
 
