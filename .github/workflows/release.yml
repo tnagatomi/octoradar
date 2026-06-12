@@ -130,7 +130,9 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           ldflags="-X main.version=${version} -X github.com/tnagatomi/octoradar/internal/oauth.BuildClientID=${CLIENT_ID}"
-          wails build -platform linux/amd64 -ldflags "$ldflags"
+          # ubuntu-latest ships webkit2gtk-4.1 only, so build against it via the
+          # webkit2_41 tag (matching the libwebkit2gtk-4.1-dev package above).
+          wails build -platform linux/amd64 -tags webkit2_41 -ldflags "$ldflags"
       - name: Package (.deb, .rpm, tarball)
         run: |
           set -euo pipefail
