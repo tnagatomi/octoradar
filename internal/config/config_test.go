@@ -52,6 +52,23 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveLoadPersistsLogin(t *testing.T) {
+	redirectHome(t)
+
+	cfg := &Config{Token: "gho_secret", Login: "alice", Users: []string{"bob"}}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Login != "alice" {
+		t.Errorf("login = %q, want alice", loaded.Login)
+	}
+}
+
 func TestLoadMigratesPlaintextToken(t *testing.T) {
 	redirectHome(t)
 

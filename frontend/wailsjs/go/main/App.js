@@ -34,6 +34,10 @@ export function RemoveUser(arg1) {
   return window['go']['main']['App']['RemoveUser'](arg1);
 }
 
+export function SignOut() {
+  return window['go']['main']['App']['SignOut']();
+}
+
 export function StartDeviceLogin() {
   return window['go']['main']['App']['StartDeviceLogin']();
 }

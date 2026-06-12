@@ -1,7 +1,7 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import './App.css';
 import {Input} from './Input';
-import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, FetchTrending, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
+import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, FetchTrending, GetSettings, RemoveUser, SignOut, StartDeviceLogin} from '../wailsjs/go/main/App';
 import {discover, feed, main} from '../wailsjs/go/models';
 import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
 import {runDeviceLogin} from './deviceLogin';
@@ -446,6 +446,8 @@ export default function App() {
     const [fetchErrors, setFetchErrors] = useState<string[]>([]);
     const [unauthorized, setUnauthorized] = useState(false);
     const [editingToken, setEditingToken] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const accountRef = useRef<HTMLDivElement>(null);
     const [uiError, setUiError] = useState('');
     const [loading, setLoading] = useState(false);
     const [newUser, setNewUser] = useState('');
@@ -538,6 +540,29 @@ export default function App() {
         }
     }, []);
 
+    // Close the account menu when clicking outside it or pressing Escape.
+    useEffect(() => {
+        if (!menuOpen) {
+            return;
+        }
+        const onPointerDown = (e: MouseEvent) => {
+            if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+                setMenuOpen(false);
+            }
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [menuOpen]);
+
     const refresh = useCallback(async () => {
         setLoading(true);
         try {
@@ -622,6 +647,28 @@ export default function App() {
         });
     };
 
+    // Switch account reuses the re-authentication flow: signing in again
+    // replaces the stored token and login with a new one.
+    const switchAccount = () => {
+        setMenuOpen(false);
+        setEditingToken(true);
+    };
+
+    // Sign out clears the backend token and login, then drops back to the
+    // sign-in screen by clearing the local feed state.
+    const signOut = async () => {
+        setMenuOpen(false);
+        try {
+            const s = await SignOut();
+            setSettings(s);
+            setUnauthorized(false);
+            setItems([]);
+            setFetchErrors([]);
+        } catch (err) {
+            setUiError(String(err));
+        }
+    };
+
     if (!settings.hasToken) {
         return <TokenSetup onDone={finishTokenEdit} />;
     }
@@ -691,9 +738,27 @@ export default function App() {
                         resolved={theme.resolved}
                         onSelect={theme.setPreference}
                     />
-                    <button className="secondary" onClick={() => setEditingToken(true)}>
-                        Re-authenticate
-                    </button>
+                    <div className="account" ref={accountRef}>
+                        <button
+                            className="secondary account-button"
+                            onClick={() => setMenuOpen((open) => !open)}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                        >
+                            {settings.login ? `@${settings.login}` : 'Account'}
+                            <span className="caret" aria-hidden="true">▾</span>
+                        </button>
+                        {menuOpen && (
+                            <div className="account-menu" role="menu">
+                                <button role="menuitem" onClick={switchAccount}>
+                                    Switch account
+                                </button>
+                                <button role="menuitem" onClick={signOut}>
+                                    Sign out
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <button className="refresh" onClick={onRefresh} disabled={headerLoading}>
                         {headerLoading ? 'Refreshing…' : 'Refresh'}
                     </button>
