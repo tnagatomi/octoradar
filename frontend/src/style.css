@@ -1,8 +1,9 @@
 /*
- * Color tokens follow GitHub's open-source Primer Primitives light theme
- * (MIT-licensed design tokens) so the UI feels native to GitHub without
- * copying any proprietary stylesheet. Dark theme is intentionally not
- * supported yet.
+ * Color tokens follow GitHub's open-source Primer Primitives (MIT-licensed
+ * design tokens) so the UI feels native to GitHub without copying any
+ * proprietary stylesheet. :root holds the light theme; the dark theme below
+ * overrides the same tokens and is selected by the data-theme attribute that
+ * theme.ts sets on <html>.
  */
 :root {
     /* Canvas / surfaces */
@@ -20,6 +21,9 @@
     --muted: #59636e;
     --subtle: #6e7781;
 
+    /* Foreground on an emphasis (solid) surface, e.g. primary-button text. */
+    --on-emphasis: #ffffff;
+
     /* Accents */
     --accent: #0969da;
     --accent-emphasis: #0969da;
@@ -32,6 +36,8 @@
     /* Danger */
     --red: #cf222e;
     --danger-emphasis: #cf222e;
+    --danger-subtle: #ffebe9;
+    --danger-border: rgba(207, 34, 46, 0.4);
 
     /* Buttons */
     --btn-bg: #f6f8fa;
@@ -42,6 +48,61 @@
 
     /* Focus ring */
     --focus-ring: rgba(9, 105, 218, 0.3);
+
+    /* Drop shadow color (floating elements). */
+    --shadow: rgba(0, 0, 0, 0.12);
+}
+
+/*
+ * Dark theme — GitHub Primer Primitives "dark". Overrides every token declared
+ * above; selected when theme.ts sets data-theme="dark" on <html>.
+ */
+:root[data-theme="dark"] {
+    /* Canvas / surfaces */
+    --bg: #0d1117;
+    --canvas-inset: #010409;
+    --panel: #161b22;
+    --overlay: #161b22;
+
+    /* Borders */
+    --border: #30363d;
+    --border-muted: #21262d;
+
+    /* Foreground text */
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --subtle: #6e7681;
+
+    /* Foreground on an emphasis (solid) surface. */
+    --on-emphasis: #ffffff;
+
+    /* Accents */
+    --accent: #2f81f7;
+    --accent-emphasis: #1f6feb;
+
+    /* Success (primary action) */
+    --green: #238636;
+    --green-hover: #2ea043;
+    --green-active: #238636;
+
+    /* Danger */
+    --red: #f85149;
+    --danger-emphasis: #da3633;
+    --danger-subtle: rgba(248, 81, 73, 0.1);
+    --danger-border: rgba(248, 81, 73, 0.4);
+
+    /* Buttons */
+    --btn-bg: #21262d;
+    --btn-hover-bg: #30363d;
+    --btn-active-bg: #282e33;
+    --btn-border: rgba(240, 246, 252, 0.1);
+    --btn-primary-border: rgba(240, 246, 252, 0.1);
+
+    /* Focus ring */
+    --focus-ring: rgba(47, 129, 247, 0.4);
+
+    /* Drop shadow color (floating elements). */
+    --shadow: rgba(1, 4, 9, 0.5);
 }
 
 * {
