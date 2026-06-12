@@ -1,444 +1,14 @@
-import {FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import './App.css';
-import {Input} from './Input';
-import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, FetchTrending, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
+import {AddUser, FetchFeed, FetchTrending, GetSettings, RemoveUser} from '../wailsjs/go/main/App';
 import {discover, feed, main} from '../wailsjs/go/models';
-import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
-import {runDeviceLogin} from './deviceLogin';
-import {LANGUAGES, PERIODS, loadPrefs, savePrefs, type DiscoverPrefs} from './discover';
-import {
-    countNew,
-    loadReadState,
-    newestRef,
-    resolveScrollTarget,
-    saveReadState,
-    toRef,
-    type ReadState,
-} from './readPosition';
-import {loadPreference, resolveTheme, savePreference, type ResolvedTheme, type ThemePreference} from './theme';
-
-// How long after the last scroll event we record the read position, and how
-// close to the top counts as "caught up to the newest item".
-const SCROLL_SAVE_DELAY = 200;
-const TOP_THRESHOLD = 4;
-
-// The id of the topmost at-least-partially-visible feed item, or null.
-function topmostVisibleId(container: HTMLElement): string | null {
-    const top = container.getBoundingClientRect().top;
-    const nodes = container.querySelectorAll<HTMLElement>('[data-item-id]');
-    for (const node of nodes) {
-        if (node.getBoundingClientRect().bottom > top + 1) {
-            return node.dataset.itemId ?? null;
-        }
-    }
-    return null;
-}
-
-// Scroll the feed so the given item sits at the top of the viewport. Returns
-// false when the item is not rendered.
-function scrollToId(container: HTMLElement, id: string): boolean {
-    const node = container.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(id)}"]`);
-    if (!node) {
-        return false;
-    }
-    container.scrollTop += node.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    return true;
-}
-
-function relativeTime(value: any): string {
-    const date = new Date(value);
-    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (seconds < 60) return 'just now';
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    return date.toLocaleDateString();
-}
-
-function absoluteTime(value: any): string {
-    return new Date(value).toLocaleString();
-}
-
-function ExternalLink({href, className, children}: {href: string; className?: string; children: ReactNode}) {
-    return (
-        <a
-            href={href}
-            className={className}
-            onClick={(e) => {
-                e.preventDefault();
-                BrowserOpenURL(href);
-            }}
-        >
-            {children}
-        </a>
-    );
-}
-
-function TokenSetup({
-    onDone,
-    onCancel,
-    reauth = false,
-    notice,
-}: {
-    onDone: () => void;
-    onCancel?: () => void;
-    reauth?: boolean;
-    notice?: string;
-}) {
-    const [prompt, setPrompt] = useState<main.DeviceLogin | null>(null);
-    const [error, setError] = useState('');
-    const [busy, setBusy] = useState(false);
-    const [copied, setCopied] = useState(false);
-
-    // Stop any in-progress poll when the sign-in screen goes away, so the
-    // backend does not keep waiting after the user backs out.
-    useEffect(() => {
-        return () => {
-            CancelDeviceLogin();
-        };
-    }, []);
-
-    const copyCode = async () => {
-        if (!prompt) return;
-        await ClipboardSetText(prompt.userCode);
-        setCopied(true);
-    };
-
-    const signIn = async () => {
-        setBusy(true);
-        setError('');
-        setPrompt(null);
-        setCopied(false);
-        try {
-            await runDeviceLogin(
-                {start: StartDeviceLogin, complete: CompleteDeviceLogin, openURL: BrowserOpenURL},
-                {onPrompt: setPrompt},
-            );
-            onDone();
-        } catch (err) {
-            setError(String(err));
-            setPrompt(null);
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    return (
-        <div className="token-setup">
-            <div className="token-card">
-                <h1>{reauth ? 'Sign in again' : 'Octoradar'}</h1>
-                {notice && <div className="error">{notice}</div>}
-                <p>
-                    {reauth
-                        ? 'Sign in with GitHub again to restore access.'
-                        : 'Sign in with GitHub to get started.'}{' '}
-                    Octoradar only reads public activity.
-                </p>
-                {prompt ? (
-                    <div className="device-prompt">
-                        <p>
-                            In the browser window that opened, enter this code at{' '}
-                            <ExternalLink href={prompt.verificationUri}>{prompt.verificationUri}</ExternalLink>:
-                        </p>
-                        <div className="device-code-row">
-                            <div className="device-code">{prompt.userCode}</div>
-                            <button type="button" className="secondary copy" onClick={copyCode}>
-                                {copied ? 'Copied' : 'Copy'}
-                            </button>
-                        </div>
-                        <p className="hint">Waiting for authorization…</p>
-                    </div>
-                ) : (
-                    error && <div className="error">{error}</div>
-                )}
-                <div className="token-actions">
-                    {onCancel && (
-                        <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
-                            Cancel
-                        </button>
-                    )}
-                    <button type="button" onClick={signIn} disabled={busy}>
-                        {busy ? 'Waiting…' : reauth ? 'Sign in again' : 'Sign in with GitHub'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-const typeIcons: Record<string, string> = {
-    WatchEvent: '⭐',
-    ForkEvent: '🍴',
-    ReleaseEvent: '🚀',
-    PublicEvent: '🎉',
-    CreateEvent: '📦',
-    SponsorshipEvent: '💖',
-    MergedPullRequest: '🔀',
-};
-
-// Reads (window.matchMedia) the current OS dark-mode preference.
-function systemPrefersDark(): boolean {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-// Owns the color-theme preference: applies the resolved theme to <html>,
-// persists the choice, and — while following the OS — re-applies when the OS
-// theme flips. The inline script in index.html applies the theme before this
-// mounts; this keeps it in sync afterwards. The resolved theme is exposed so
-// the header control can show the matching icon.
-function useTheme(): {
-    preference: ThemePreference;
-    resolved: ResolvedTheme;
-    setPreference: (pref: ThemePreference) => void;
-} {
-    const [preference, setPreference] = useState<ThemePreference>(() => loadPreference());
-    const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(preference, systemPrefersDark()));
-
-    const apply = useCallback((theme: ResolvedTheme) => {
-        setResolved(theme);
-        document.documentElement.setAttribute('data-theme', theme);
-    }, []);
-
-    useEffect(() => {
-        apply(resolveTheme(preference, systemPrefersDark()));
-        savePreference(preference);
-    }, [preference, apply]);
-
-    useEffect(() => {
-        if (preference !== 'auto') {
-            return;
-        }
-        const media = window.matchMedia('(prefers-color-scheme: dark)');
-        const onChange = () => apply(resolveTheme('auto', media.matches));
-        media.addEventListener('change', onChange);
-        return () => media.removeEventListener('change', onChange);
-    }, [preference, apply]);
-
-    return {preference, resolved, setPreference};
-}
-
-function SunIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path d="M8 2.5a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-1.5 0v-.5A.75.75 0 0 1 8 2.5Zm0 9a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-1.5 0v-.5A.75.75 0 0 1 8 11.5Zm5.5-3.5a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5a.75.75 0 0 1 .75.75Zm-9 0a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5a.75.75 0 0 1 .75.75Zm7.39-3.89a.75.75 0 0 1 0 1.06l-.36.36a.75.75 0 1 1-1.06-1.06l.36-.36a.75.75 0 0 1 1.06 0ZM5.18 10.18a.75.75 0 0 1 0 1.06l-.36.36a.75.75 0 1 1-1.06-1.06l.36-.36a.75.75 0 0 1 1.06 0Zm6.3 1.42a.75.75 0 0 1-1.06 0l-.36-.36a.75.75 0 1 1 1.06-1.06l.36.36a.75.75 0 0 1 0 1.06ZM5.18 5.82a.75.75 0 0 1-1.06 0l-.36-.36a.75.75 0 0 1 1.06-1.06l.36.36a.75.75 0 0 1 0 1.06ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
-        </svg>
-    );
-}
-
-function MoonIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path d="M9.598 1.591a.75.75 0 0 1 .785-.175 7 7 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.5 5.5 0 1 0 7.678-7.678Z" />
-        </svg>
-    );
-}
-
-// Appearance picker: an icon button (sun/moon for the active theme) that opens
-// a small popover to choose Auto / Light / Dark.
-function ThemeMenu({
-    preference,
-    resolved,
-    onSelect,
-}: {
-    preference: ThemePreference;
-    resolved: ResolvedTheme;
-    onSelect: (pref: ThemePreference) => void;
-}) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
-
-    // Close on outside click or Escape while the popover is open.
-    useEffect(() => {
-        if (!open) {
-            return;
-        }
-        const onPointerDown = (e: PointerEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) {
-                setOpen(false);
-            }
-        };
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                setOpen(false);
-            }
-        };
-        document.addEventListener('pointerdown', onPointerDown);
-        document.addEventListener('keydown', onKeyDown);
-        return () => {
-            document.removeEventListener('pointerdown', onPointerDown);
-            document.removeEventListener('keydown', onKeyDown);
-        };
-    }, [open]);
-
-    const options: {value: ThemePreference; label: string}[] = [
-        {value: 'auto', label: 'Auto'},
-        {value: 'light', label: 'Light'},
-        {value: 'dark', label: 'Dark'},
-    ];
-
-    return (
-        <div className="theme-menu" ref={ref}>
-            <button
-                className="secondary theme-toggle"
-                aria-label="Color theme"
-                aria-haspopup="menu"
-                aria-expanded={open}
-                onClick={() => setOpen((o) => !o)}
-            >
-                {resolved === 'dark' ? <MoonIcon /> : <SunIcon />}
-            </button>
-            {open && (
-                <ul className="theme-popover" role="menu">
-                    {options.map((opt) => (
-                        <li key={opt.value} role="none">
-                            <button
-                                role="menuitemradio"
-                                aria-checked={preference === opt.value}
-                                className={preference === opt.value ? 'active' : ''}
-                                onClick={() => {
-                                    onSelect(opt.value);
-                                    setOpen(false);
-                                }}
-                            >
-                                <span className="check" aria-hidden="true">
-                                    {preference === opt.value ? '✓' : ''}
-                                </span>
-                                {opt.label}
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </div>
-    );
-}
-
-function FeedItem({item}: {item: feed.Item}) {
-    return (
-        <li className="feed-item" data-item-id={item.id}>
-            <img className="avatar" src={item.avatarUrl} alt="" />
-            <div className="feed-body">
-                <div className="feed-line">
-                    <ExternalLink href={`https://github.com/${item.actor}`} className="actor">
-                        {item.actor}
-                    </ExternalLink>{' '}
-                    {item.action}{' '}
-                    <ExternalLink href={item.targetUrl} className="target">
-                        {item.target}
-                    </ExternalLink>
-                    {item.trailer && <> {item.trailer}</>}
-                </div>
-                <div className="feed-meta">
-                    <span className="type-icon">{typeIcons[item.type] ?? ''}</span>
-                    <span className="time" title={absoluteTime(item.createdAt)}>{relativeTime(item.createdAt)}</span>
-                </div>
-            </div>
-        </li>
-    );
-}
-
-function RepoCard({repo}: {repo: discover.Repository}) {
-    return (
-        <li className="repo-card">
-            <img className="avatar" src={repo.ownerAvatarUrl} alt="" />
-            <div className="repo-body">
-                <ExternalLink href={repo.url} className="repo-name">
-                    {repo.fullName}
-                </ExternalLink>
-                {repo.description && <p className="repo-desc">{repo.description}</p>}
-                <div className="repo-meta">
-                    {repo.language && <span className="repo-lang">{repo.language}</span>}
-                    <span className="repo-stat">⭐ {repo.stars.toLocaleString()}</span>
-                    <span className="repo-stat">🍴 {repo.forks.toLocaleString()}</span>
-                </div>
-            </div>
-        </li>
-    );
-}
-
-function DiscoverView({
-    prefs,
-    onChangePrefs,
-    result,
-    loading,
-    unauthorized,
-    onUpdateToken,
-}: {
-    prefs: DiscoverPrefs;
-    onChangePrefs: (next: DiscoverPrefs) => void;
-    result: discover.Result | null;
-    loading: boolean;
-    unauthorized: boolean;
-    onUpdateToken: () => void;
-}) {
-    const repositories = result?.repositories ?? [];
-    const errors = result?.errors ?? [];
-    return (
-        <div className="layout">
-            <aside className="sidebar">
-                <h2>Discover</h2>
-                <div className="segmented" role="group" aria-label="Time period">
-                    {PERIODS.map((p) => (
-                        <button
-                            key={p.value}
-                            className={p.value === prefs.period ? 'segment active' : 'segment'}
-                            onClick={() => onChangePrefs({...prefs, period: p.value})}
-                        >
-                            {p.label}
-                        </button>
-                    ))}
-                </div>
-                <label className="field-label" htmlFor="discover-language">
-                    Language
-                </label>
-                <select
-                    id="discover-language"
-                    className="language-select"
-                    value={prefs.language}
-                    onChange={(e) => onChangePrefs({...prefs, language: e.target.value})}
-                >
-                    {LANGUAGES.map((l) => (
-                        <option key={l.value} value={l.value}>
-                            {l.label}
-                        </option>
-                    ))}
-                </select>
-                <p className="hint">Newly created repositories, most-starred first.</p>
-            </aside>
-            <main className="feed">
-                {unauthorized && (
-                    <div className="error banner auth-banner">
-                        <span>Your GitHub session has expired. Re-authenticate to keep discovering.</span>
-                        <button className="secondary" onClick={onUpdateToken}>
-                            Re-authenticate
-                        </button>
-                    </div>
-                )}
-                {errors.length > 0 && (
-                    <div className="error banner">
-                        {errors.map((err) => (
-                            <div key={err}>{err}</div>
-                        ))}
-                    </div>
-                )}
-                {repositories.length > 0 ? (
-                    <ul className="repo-list">
-                        {repositories.map((repo) => (
-                            <RepoCard key={repo.fullName} repo={repo} />
-                        ))}
-                    </ul>
-                ) : loading ? (
-                    <p className="hint empty">Loading trending repositories…</p>
-                ) : (
-                    !unauthorized && <p className="hint empty">No trending repositories found.</p>
-                )}
-            </main>
-        </div>
-    );
-}
+import {savePrefs, loadPrefs, type DiscoverPrefs} from './discover';
+import {DiscoverView} from './components/DiscoverView';
+import {FeedView} from './components/FeedView';
+import {ThemeMenu} from './components/ThemeMenu';
+import {TokenSetup} from './components/TokenSetup';
+import {useFeedReadPosition} from './hooks/useFeedReadPosition';
+import {useTheme} from './hooks/useTheme';
 
 export default function App() {
     const [settings, setSettings] = useState<main.Settings | null>(null);
@@ -448,10 +18,11 @@ export default function App() {
     const [editingToken, setEditingToken] = useState(false);
     const [uiError, setUiError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [newUser, setNewUser] = useState('');
-    const [newCount, setNewCount] = useState(0);
     const [view, setView] = useState<'feed' | 'discover'>('feed');
     const theme = useTheme();
+
+    // Owns the feed's scroll/read position and the "new since last read" badge.
+    const {feedRef, newCount, handleScroll, jumpToTop} = useFeedReadPosition(items, view);
 
     // Discover (trending) state. Results are cached per (period, language) for
     // the session so flipping tabs or filters back and forth does not re-spend
@@ -460,83 +31,6 @@ export default function App() {
     const [discoverResult, setDiscoverResult] = useState<discover.Result | null>(null);
     const [discoverLoading, setDiscoverLoading] = useState(false);
     const discoverCache = useRef<Map<string, discover.Result>>(new Map());
-
-    // The scroll container, the latest items, and the persisted read state are
-    // held in refs so the scroll handler always sees current values without
-    // being re-created on every render.
-    const feedRef = useRef<HTMLElement>(null);
-    const itemsRef = useRef<feed.Item[]>([]);
-    itemsRef.current = items;
-    const stateRef = useRef<ReadState | null>(null);
-    if (stateRef.current === null) {
-        stateRef.current = loadReadState();
-    }
-    const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    // Advance the high-water mark to the newest item: the user has caught up, so
-    // the "new" count resets to zero.
-    const markCaughtUp = useCallback(() => {
-        const state = stateRef.current!;
-        state.highWater = newestRef(itemsRef.current) ?? state.highWater;
-        saveReadState(state);
-        setNewCount(0);
-    }, []);
-
-    // After each fetch, restore the reading position and recompute the badge.
-    useLayoutEffect(() => {
-        const container = feedRef.current;
-        if (!container || items.length === 0) {
-            return;
-        }
-        const state = stateRef.current!;
-        const target = resolveScrollTarget(items, state.anchor);
-        if (target && scrollToId(container, target)) {
-            setNewCount(countNew(items, state.highWater));
-        } else {
-            // Fresh start (no anchor) or the anchor is gone: sit at the newest
-            // item, which means we are already caught up.
-            container.scrollTop = 0;
-            markCaughtUp();
-        }
-    }, [items, markCaughtUp, view]);
-
-    const handleScroll = useCallback(() => {
-        if (saveTimer.current) {
-            clearTimeout(saveTimer.current);
-        }
-        saveTimer.current = setTimeout(() => {
-            const container = feedRef.current;
-            if (!container) {
-                return;
-            }
-            const state = stateRef.current!;
-            const topId = topmostVisibleId(container);
-            if (topId) {
-                const item = itemsRef.current.find((it) => it.id === topId);
-                if (item) {
-                    state.anchor = toRef(item);
-                }
-            }
-            if (container.scrollTop <= TOP_THRESHOLD) {
-                markCaughtUp();
-            }
-            saveReadState(state);
-        }, SCROLL_SAVE_DELAY);
-    }, [markCaughtUp]);
-
-    const jumpToTop = useCallback(() => {
-        const container = feedRef.current;
-        if (container) {
-            container.scrollTop = 0;
-        }
-        markCaughtUp();
-    }, [markCaughtUp]);
-
-    useEffect(() => () => {
-        if (saveTimer.current) {
-            clearTimeout(saveTimer.current);
-        }
-    }, []);
 
     const refresh = useCallback(async () => {
         setLoading(true);
@@ -637,16 +131,17 @@ export default function App() {
         );
     }
 
-    const addUser = async (e: FormEvent) => {
-        e.preventDefault();
+    // Returns whether the add succeeded, so FeedView can clear its input.
+    const addUser = async (username: string): Promise<boolean> => {
         setUiError('');
         try {
-            const updated = await AddUser(newUser);
+            const updated = await AddUser(username);
             setSettings(updated);
-            setNewUser('');
             refresh();
+            return true;
         } catch (err) {
             setUiError(String(err));
+            return false;
         }
     };
 
@@ -709,68 +204,21 @@ export default function App() {
                     onUpdateToken={() => setEditingToken(true)}
                 />
             ) : (
-            <div className="layout">
-                <aside className="sidebar">
-                    <h2>Following</h2>
-                    <form className="add-user" onSubmit={addUser}>
-                        <Input
-                            placeholder="Add a username"
-                            value={newUser}
-                            onChange={(e) => setNewUser(e.target.value)}
-                        />
-                        <button type="submit" disabled={newUser.trim() === ''}>
-                            Add
-                        </button>
-                    </form>
-                    {uiError && <div className="error">{uiError}</div>}
-                    <ul className="user-list">
-                        {settings.users.map((user) => (
-                            <li key={user}>
-                                <ExternalLink href={`https://github.com/${user}`}>{user}</ExternalLink>
-                                <button className="remove" onClick={() => removeUser(user)} title={`Unfollow ${user}`}>
-                                    ×
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                    {settings.users.length === 0 && (
-                        <p className="hint">Add GitHub usernames to build your feed.</p>
-                    )}
-                </aside>
-                <main className="feed" ref={feedRef} onScroll={handleScroll}>
-                    <div className="new-badge-rail">
-                        {newCount > 0 && (
-                            <button className="new-badge" onClick={jumpToTop}>
-                                {newCount} new ↑
-                            </button>
-                        )}
-                    </div>
-                    {unauthorized && (
-                        <div className="error banner auth-banner">
-                            <span>Your GitHub session has expired. Re-authenticate to keep your feed working.</span>
-                            <button className="secondary" onClick={() => setEditingToken(true)}>
-                                Re-authenticate
-                            </button>
-                        </div>
-                    )}
-                    {fetchErrors.length > 0 && (
-                        <div className="error banner">
-                            {fetchErrors.map((err) => (
-                                <div key={err}>{err}</div>
-                            ))}
-                        </div>
-                    )}
-                    {items.length === 0 && !loading ? (
-                        <p className="hint empty">No events yet.</p>
-                    ) : (
-                        <ul className="feed-list">
-                            {items.map((item) => (
-                                <FeedItem key={item.id} item={item} />
-                            ))}
-                        </ul>
-                    )}
-                </main>
-            </div>
+                <FeedView
+                    users={settings.users}
+                    onAddUser={addUser}
+                    onRemoveUser={removeUser}
+                    uiError={uiError}
+                    items={items}
+                    loading={loading}
+                    fetchErrors={fetchErrors}
+                    unauthorized={unauthorized}
+                    onReauthenticate={() => setEditingToken(true)}
+                    feedRef={feedRef}
+                    newCount={newCount}
+                    onScroll={handleScroll}
+                    onJumpToTop={jumpToTop}
+                />
             )}
         </div>
     );
