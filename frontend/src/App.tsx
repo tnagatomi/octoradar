@@ -1,9 +1,10 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import './App.css';
 import {Input} from './Input';
-import {AddUser, FetchFeed, GetSettings, RemoveUser, SetToken} from '../wailsjs/go/main/App';
+import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
 import {feed, main} from '../wailsjs/go/models';
-import {BrowserOpenURL} from '../wailsjs/runtime/runtime';
+import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
+import {runDeviceLogin} from './deviceLogin';
 import {
     countNew,
     loadReadState,
@@ -85,54 +86,83 @@ function TokenSetup({
     reauth?: boolean;
     notice?: string;
 }) {
-    const [token, setToken] = useState('');
+    const [prompt, setPrompt] = useState<main.DeviceLogin | null>(null);
     const [error, setError] = useState('');
-    const [saving, setSaving] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [copied, setCopied] = useState(false);
 
-    const submit = async (e: FormEvent) => {
-        e.preventDefault();
-        setSaving(true);
+    // Stop any in-progress poll when the sign-in screen goes away, so the
+    // backend does not keep waiting after the user backs out.
+    useEffect(() => {
+        return () => {
+            CancelDeviceLogin();
+        };
+    }, []);
+
+    const copyCode = async () => {
+        if (!prompt) return;
+        await ClipboardSetText(prompt.userCode);
+        setCopied(true);
+    };
+
+    const signIn = async () => {
+        setBusy(true);
         setError('');
+        setPrompt(null);
+        setCopied(false);
         try {
-            await SetToken(token);
+            await runDeviceLogin(
+                {start: StartDeviceLogin, complete: CompleteDeviceLogin, openURL: BrowserOpenURL},
+                {onPrompt: setPrompt},
+            );
             onDone();
         } catch (err) {
             setError(String(err));
+            setPrompt(null);
         } finally {
-            setSaving(false);
+            setBusy(false);
         }
     };
 
     return (
         <div className="token-setup">
-            <form className="token-card" onSubmit={submit}>
-                <h1>{reauth ? 'Update token' : 'Octoradar'}</h1>
+            <div className="token-card">
+                <h1>{reauth ? 'Sign in again' : 'Octoradar'}</h1>
                 {notice && <div className="error">{notice}</div>}
                 <p>
                     {reauth
-                        ? 'Enter a new GitHub personal access token to replace the current one.'
-                        : 'Enter a GitHub personal access token to get started.'}{' '}
-                    A fine-grained token with no extra permissions is enough for public activity.
+                        ? 'Sign in with GitHub again to restore access.'
+                        : 'Sign in with GitHub to get started.'}{' '}
+                    Octoradar only reads public activity.
                 </p>
-                <Input
-                    type="password"
-                    placeholder="github_pat_... / ghp_..."
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    autoFocus
-                />
-                {error && <div className="error">{error}</div>}
+                {prompt ? (
+                    <div className="device-prompt">
+                        <p>
+                            In the browser window that opened, enter this code at{' '}
+                            <ExternalLink href={prompt.verificationUri}>{prompt.verificationUri}</ExternalLink>:
+                        </p>
+                        <div className="device-code-row">
+                            <div className="device-code">{prompt.userCode}</div>
+                            <button type="button" className="secondary copy" onClick={copyCode}>
+                                {copied ? 'Copied' : 'Copy'}
+                            </button>
+                        </div>
+                        <p className="hint">Waiting for authorization…</p>
+                    </div>
+                ) : (
+                    error && <div className="error">{error}</div>
+                )}
                 <div className="token-actions">
                     {onCancel && (
-                        <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+                        <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
                             Cancel
                         </button>
                     )}
-                    <button type="submit" disabled={saving || token.trim() === ''}>
-                        {saving ? 'Validating…' : 'Save token'}
+                    <button type="button" onClick={signIn} disabled={busy}>
+                        {busy ? 'Waiting…' : reauth ? 'Sign in again' : 'Sign in with GitHub'}
                     </button>
                 </div>
-            </form>
+            </div>
         </div>
     );
 }
@@ -305,7 +335,7 @@ export default function App() {
         return (
             <TokenSetup
                 reauth
-                notice={unauthorized ? 'Your GitHub token is invalid or expired. Enter a new one to continue.' : undefined}
+                notice={unauthorized ? 'Your GitHub session has expired. Sign in again to continue.' : undefined}
                 onDone={finishTokenEdit}
                 onCancel={() => setEditingToken(false)}
             />
@@ -342,7 +372,7 @@ export default function App() {
                 <span className="brand">Octoradar</span>
                 <div className="header-actions">
                     <button className="secondary" onClick={() => setEditingToken(true)}>
-                        Update token
+                        Re-authenticate
                     </button>
                     <button className="refresh" onClick={refresh} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
@@ -387,9 +417,9 @@ export default function App() {
                     </div>
                     {unauthorized && (
                         <div className="error banner auth-banner">
-                            <span>Your GitHub token is invalid or expired. Update it to keep your feed working.</span>
+                            <span>Your GitHub session has expired. Re-authenticate to keep your feed working.</span>
                             <button className="secondary" onClick={() => setEditingToken(true)}>
-                                Update token
+                                Re-authenticate
                             </button>
                         </div>
                     )}

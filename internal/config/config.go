@@ -7,14 +7,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/zalando/go-keyring"
 )
 
-// Config holds the persisted application settings.
-//
-// The token is stored as plain text for now; moving it to the OS
-// keychain is planned before any distribution.
+// Config holds the persisted application settings. The token lives in the
+// OS keychain; only the non-secret follow list is written to disk.
 type Config struct {
-	Token string   `json:"token"`
+	Token string   `json:"-"`
 	Users []string `json:"users"`
 }
 
@@ -24,6 +24,12 @@ type Config struct {
 const (
 	appDir       = "octoradar"
 	legacyAppDir = "octofeed"
+)
+
+// keyring identifiers for the GitHub token.
+const (
+	keyringService = "octoradar"
+	keyringUser    = "github-token"
 )
 
 // Path returns the location of the config file.
@@ -59,11 +65,7 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
+	return fromFile(data)
 }
 
 // loadLegacy reads a pre-rename config and persists it at the new path.
@@ -80,17 +82,39 @@ func loadLegacy() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	// Best-effort migration; ignore failure so a read-only legacy dir
-	// does not block startup.
-	_ = cfg.Save()
-	return &cfg, nil
+	return fromFile(data)
 }
 
-// Save writes the config to disk with owner-only permissions.
+// fromFile parses the on-disk settings and resolves the token from the
+// keychain. A token still stored as plain text on disk (from before the
+// keychain migration) is moved into the keychain and stripped from the file.
+func fromFile(data []byte) (*Config, error) {
+	var file struct {
+		Token string   `json:"token"`
+		Users []string `json:"users"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	cfg := &Config{Users: file.Users}
+
+	token, err := keyring.Get(keyringService, keyringUser)
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return nil, err
+	}
+	cfg.Token = token
+
+	if cfg.Token == "" && file.Token != "" {
+		cfg.Token = file.Token
+		if err := cfg.Save(); err != nil {
+			return nil, err
+		}
+	}
+	return cfg, nil
+}
+
+// Save persists the non-secret settings to disk and the token to the OS
+// keychain. An empty token removes any stored keychain entry.
 func (c *Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -103,5 +127,16 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+
+	if c.Token == "" {
+		err := keyring.Delete(keyringService, keyringUser)
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	return keyring.Set(keyringService, keyringUser, c.Token)
 }
