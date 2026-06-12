@@ -85,6 +85,51 @@ button:focus-visible {
     cursor: default;
 }
 
+/* Account control: a neutral button that toggles a dropdown menu. */
+.account {
+    position: relative;
+}
+
+.account-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.account-button .caret {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* Menu anchored to the right edge of the account button, GitHub overlay style. */
+.account-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 10;
+    min-width: 160px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--overlay);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+}
+
+.account-menu button {
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--text);
+    text-align: left;
+}
+
+.account-menu button:hover {
+    background-color: var(--btn-hover-bg);
+}
+
 .layout {
     display: flex;
     flex: 1;
