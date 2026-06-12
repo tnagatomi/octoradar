@@ -14,6 +14,7 @@ import {
     toRef,
     type ReadState,
 } from './readPosition';
+import {loadPreference, resolveTheme, savePreference, type ThemePreference} from './theme';
 
 // How long after the last scroll event we record the read position, and how
 // close to the top counts as "caught up to the newest item".
@@ -177,6 +178,38 @@ const typeIcons: Record<string, string> = {
     MergedPullRequest: '🔀',
 };
 
+// Reads (window.matchMedia) the current OS dark-mode preference.
+function systemPrefersDark(): boolean {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+// Owns the color-theme preference: applies the resolved theme to <html>,
+// persists the choice, and — while following the OS — re-applies when the OS
+// theme flips. The inline script in index.html applies the theme before this
+// mounts; this keeps it in sync afterwards.
+function useThemePreference(): [ThemePreference, (pref: ThemePreference) => void] {
+    const [preference, setPreference] = useState<ThemePreference>(() => loadPreference());
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', resolveTheme(preference, systemPrefersDark()));
+        savePreference(preference);
+    }, [preference]);
+
+    useEffect(() => {
+        if (preference !== 'auto') {
+            return;
+        }
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const apply = () => {
+            document.documentElement.setAttribute('data-theme', resolveTheme('auto', media.matches));
+        };
+        media.addEventListener('change', apply);
+        return () => media.removeEventListener('change', apply);
+    }, [preference]);
+
+    return [preference, setPreference];
+}
+
 function FeedItem({item}: {item: feed.Item}) {
     return (
         <li className="feed-item" data-item-id={item.id}>
@@ -211,6 +244,7 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const [newUser, setNewUser] = useState('');
     const [newCount, setNewCount] = useState(0);
+    const [themePreference, setThemePreference] = useThemePreference();
 
     // The scroll container, the latest items, and the persisted read state are
     // held in refs so the scroll handler always sees current values without
@@ -371,6 +405,16 @@ export default function App() {
             <header className="header">
                 <span className="brand">Octoradar</span>
                 <div className="header-actions">
+                    <select
+                        className="theme-select"
+                        aria-label="Color theme"
+                        value={themePreference}
+                        onChange={(e) => setThemePreference(e.target.value as ThemePreference)}
+                    >
+                        <option value="auto">Auto</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
                     <button className="secondary" onClick={() => setEditingToken(true)}>
                         Re-authenticate
                     </button>
