@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "semanticCommits": "enabled",
+  "semanticCommitScope": null,
+  "packageRules": [
+    {
+      "description": "Keep the Go toolchain version in go.mod up to date",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"]
+    },
+    {
+      "description": "Group GitHub Actions updates (SHA pins stay pinned via helpers:pinGitHubActionDigests)",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Group frontend dev dependencies into a single PR",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "groupName": "frontend devDependencies"
+    }
+  ]
+}
