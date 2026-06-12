@@ -15,6 +15,4 @@ export function GetSettings():Promise<main.Settings>;
 
 export function RemoveUser(arg1:string):Promise<main.Settings>;
 
-export function SetToken(arg1:string):Promise<string>;
-
 export function StartDeviceLogin():Promise<main.DeviceLogin>;

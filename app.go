@@ -59,19 +59,9 @@ func (a *App) settingsLocked() Settings {
 	}
 }
 
-// SetToken validates the token against the API, persists it, and returns
-// the authenticated user's login.
-func (a *App) SetToken(token string) (string, error) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return "", fmt.Errorf("token is empty")
-	}
-	return a.validateAndSaveToken(token)
-}
-
 // validateAndSaveToken confirms the token works by resolving the viewer,
-// then persists it and returns the authenticated user's login. It is shared
-// by the manual token entry and the device flow.
+// then persists it and returns the authenticated user's login. It is the
+// final step of the device flow, after polling yields a token.
 func (a *App) validateAndSaveToken(token string) (string, error) {
 	login, err := github.NewClient(token).Viewer(a.ctx)
 	if err != nil {

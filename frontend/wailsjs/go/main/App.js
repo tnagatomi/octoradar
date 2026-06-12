@@ -26,10 +26,6 @@ export function RemoveUser(arg1) {
   return window['go']['main']['App']['RemoveUser'](arg1);
 }
 
-export function SetToken(arg1) {
-  return window['go']['main']['App']['SetToken'](arg1);
-}
-
 export function StartDeviceLogin() {
   return window['go']['main']['App']['StartDeviceLogin']();
 }
