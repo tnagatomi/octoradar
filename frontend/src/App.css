@@ -1,3 +1,12 @@
+:root {
+    /*
+     * Maximum width of the centered feed/discover lane. Below this the lane
+     * fills the available pane width; above it the lane caps here and the pane
+     * grows the side margins, keeping line length readable on wide windows.
+     */
+    --lane-max-width: 1100px;
+}
+
 .app {
     display: flex;
     flex-direction: column;
@@ -397,7 +406,7 @@ button:focus-visible {
     list-style: none;
     margin: 0 auto;
     padding: 0;
-    max-width: 720px;
+    max-width: var(--lane-max-width);
     background-color: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -497,7 +506,7 @@ button:focus-visible {
     list-style: none;
     margin: 0 auto;
     padding: 0;
-    max-width: 720px;
+    max-width: var(--lane-max-width);
     background-color: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
