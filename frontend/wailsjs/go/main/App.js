@@ -41,3 +41,7 @@ export function SignOut() {
 export function StartDeviceLogin() {
   return window['go']['main']['App']['StartDeviceLogin']();
 }
+
+export function Version() {
+  return window['go']['main']['App']['Version']();
+}

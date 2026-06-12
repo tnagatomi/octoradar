@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import './App.css';
-import {AddUser, FetchFeed, FetchTrending, GetSettings, RemoveUser, SignOut} from '../wailsjs/go/main/App';
+import {AddUser, FetchFeed, FetchTrending, GetSettings, RemoveUser, SignOut, Version} from '../wailsjs/go/main/App';
 import {discover, feed, main} from '../wailsjs/go/models';
 import {savePrefs, loadPrefs, type DiscoverPrefs} from './discover';
 import {DiscoverView} from './components/DiscoverView';
@@ -21,6 +21,7 @@ export default function App() {
     const [uiError, setUiError] = useState('');
     const [loading, setLoading] = useState(false);
     const [view, setView] = useState<'feed' | 'discover'>('feed');
+    const [version, setVersion] = useState('');
     const theme = useTheme();
 
     // Owns the feed's scroll/read position and the "new since last read" badge.
@@ -120,6 +121,10 @@ export default function App() {
             }
         });
     }, [refresh]);
+
+    useEffect(() => {
+        Version().then(setVersion);
+    }, []);
 
     if (settings === null) {
         return null;
@@ -252,6 +257,7 @@ export default function App() {
                                 <button role="menuitem" onClick={signOut}>
                                     Sign out
                                 </button>
+                                {version && <div className="account-version">Octoradar {version}</div>}
                             </div>
                         )}
                     </div>

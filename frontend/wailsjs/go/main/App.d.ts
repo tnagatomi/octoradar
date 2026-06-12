@@ -23,3 +23,5 @@ export function RemoveUser(arg1:string):Promise<main.Settings>;
 export function SignOut():Promise<main.Settings>;
 
 export function StartDeviceLogin():Promise<main.DeviceLogin>;
+
+export function Version():Promise<string>;
