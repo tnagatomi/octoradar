@@ -47,7 +47,7 @@ button:focus-visible {
     padding: 5px 16px;
     border: 1px solid var(--btn-primary-border);
     background-color: var(--green);
-    color: #fff;
+    color: var(--on-emphasis);
 }
 
 .refresh:hover:not(:disabled) {
@@ -225,10 +225,10 @@ button:focus-visible {
     border: 1px solid var(--btn-primary-border);
     border-radius: 999px;
     background-color: var(--green);
-    color: #fff;
+    color: var(--on-emphasis);
     font-weight: 500;
     font-size: 13px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 1px 3px var(--shadow);
 }
 
 .new-badge:hover {
@@ -351,7 +351,7 @@ button:focus-visible {
     border: 1px solid var(--btn-primary-border);
     border-radius: 6px;
     background-color: var(--green);
-    color: #fff;
+    color: var(--on-emphasis);
     font-weight: 500;
 }
 
@@ -426,8 +426,8 @@ button:focus-visible {
     max-width: 720px;
     padding: 12px 16px;
     color: var(--text);
-    background-color: #ffebe9;
-    border: 1px solid rgba(207, 34, 46, 0.4);
+    background-color: var(--danger-subtle);
+    border: 1px solid var(--danger-border);
     border-radius: 6px;
 }
 
