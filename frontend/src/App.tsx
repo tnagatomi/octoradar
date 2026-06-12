@@ -212,7 +212,7 @@ export default function App() {
         return (
             <TokenSetup
                 reauth
-                notice={unauthorized ? 'Your GitHub token is invalid or expired. Enter a new one to continue.' : undefined}
+                notice={unauthorized ? 'Your GitHub session has expired. Sign in again to continue.' : undefined}
                 onDone={finishTokenEdit}
                 onCancel={() => setEditingToken(false)}
             />
@@ -249,7 +249,7 @@ export default function App() {
                 <span className="brand">Octoradar</span>
                 <div className="header-actions">
                     <button className="secondary" onClick={() => setEditingToken(true)}>
-                        Update token
+                        Re-authenticate
                     </button>
                     <button className="refresh" onClick={refresh} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
@@ -287,9 +287,9 @@ export default function App() {
                 <main className="feed">
                     {unauthorized && (
                         <div className="error banner auth-banner">
-                            <span>Your GitHub token is invalid or expired. Update it to keep your feed working.</span>
+                            <span>Your GitHub session has expired. Re-authenticate to keep your feed working.</span>
                             <button className="secondary" onClick={() => setEditingToken(true)}>
-                                Update token
+                                Re-authenticate
                             </button>
                         </div>
                     )}
