@@ -18,6 +18,10 @@ export function FetchFeed() {
   return window['go']['main']['App']['FetchFeed']();
 }
 
+export function FetchTrending(arg1, arg2) {
+  return window['go']['main']['App']['FetchTrending'](arg1, arg2);
+}
+
 export function FetchUserFeed(arg1) {
   return window['go']['main']['App']['FetchUserFeed'](arg1);
 }

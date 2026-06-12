@@ -1,10 +1,11 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import './App.css';
 import {Input} from './Input';
-import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
-import {feed, main} from '../wailsjs/go/models';
+import {AddUser, CancelDeviceLogin, CompleteDeviceLogin, FetchFeed, FetchTrending, GetSettings, RemoveUser, StartDeviceLogin} from '../wailsjs/go/main/App';
+import {discover, feed, main} from '../wailsjs/go/models';
 import {BrowserOpenURL, ClipboardSetText} from '../wailsjs/runtime/runtime';
 import {runDeviceLogin} from './deviceLogin';
+import {LANGUAGES, PERIODS, loadPrefs, savePrefs, type DiscoverPrefs} from './discover';
 import {
     countNew,
     loadReadState,
@@ -339,6 +340,106 @@ function FeedItem({item}: {item: feed.Item}) {
     );
 }
 
+function RepoCard({repo}: {repo: discover.Repository}) {
+    return (
+        <li className="repo-card">
+            <img className="avatar" src={repo.ownerAvatarUrl} alt="" />
+            <div className="repo-body">
+                <ExternalLink href={repo.url} className="repo-name">
+                    {repo.fullName}
+                </ExternalLink>
+                {repo.description && <p className="repo-desc">{repo.description}</p>}
+                <div className="repo-meta">
+                    {repo.language && <span className="repo-lang">{repo.language}</span>}
+                    <span className="repo-stat">⭐ {repo.stars.toLocaleString()}</span>
+                    <span className="repo-stat">🍴 {repo.forks.toLocaleString()}</span>
+                </div>
+            </div>
+        </li>
+    );
+}
+
+function DiscoverView({
+    prefs,
+    onChangePrefs,
+    result,
+    loading,
+    unauthorized,
+    onUpdateToken,
+}: {
+    prefs: DiscoverPrefs;
+    onChangePrefs: (next: DiscoverPrefs) => void;
+    result: discover.Result | null;
+    loading: boolean;
+    unauthorized: boolean;
+    onUpdateToken: () => void;
+}) {
+    const repositories = result?.repositories ?? [];
+    const errors = result?.errors ?? [];
+    return (
+        <div className="layout">
+            <aside className="sidebar">
+                <h2>Discover</h2>
+                <div className="segmented" role="group" aria-label="Time period">
+                    {PERIODS.map((p) => (
+                        <button
+                            key={p.value}
+                            className={p.value === prefs.period ? 'segment active' : 'segment'}
+                            onClick={() => onChangePrefs({...prefs, period: p.value})}
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                </div>
+                <label className="field-label" htmlFor="discover-language">
+                    Language
+                </label>
+                <select
+                    id="discover-language"
+                    className="language-select"
+                    value={prefs.language}
+                    onChange={(e) => onChangePrefs({...prefs, language: e.target.value})}
+                >
+                    {LANGUAGES.map((l) => (
+                        <option key={l.value} value={l.value}>
+                            {l.label}
+                        </option>
+                    ))}
+                </select>
+                <p className="hint">Newly created repositories, most-starred first.</p>
+            </aside>
+            <main className="feed">
+                {unauthorized && (
+                    <div className="error banner auth-banner">
+                        <span>Your GitHub session has expired. Re-authenticate to keep discovering.</span>
+                        <button className="secondary" onClick={onUpdateToken}>
+                            Re-authenticate
+                        </button>
+                    </div>
+                )}
+                {errors.length > 0 && (
+                    <div className="error banner">
+                        {errors.map((err) => (
+                            <div key={err}>{err}</div>
+                        ))}
+                    </div>
+                )}
+                {repositories.length > 0 ? (
+                    <ul className="repo-list">
+                        {repositories.map((repo) => (
+                            <RepoCard key={repo.fullName} repo={repo} />
+                        ))}
+                    </ul>
+                ) : loading ? (
+                    <p className="hint empty">Loading trending repositories…</p>
+                ) : (
+                    !unauthorized && <p className="hint empty">No trending repositories found.</p>
+                )}
+            </main>
+        </div>
+    );
+}
+
 export default function App() {
     const [settings, setSettings] = useState<main.Settings | null>(null);
     const [items, setItems] = useState<feed.Item[]>([]);
@@ -349,7 +450,16 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const [newUser, setNewUser] = useState('');
     const [newCount, setNewCount] = useState(0);
+    const [view, setView] = useState<'feed' | 'discover'>('feed');
     const theme = useTheme();
+
+    // Discover (trending) state. Results are cached per (period, language) for
+    // the session so flipping tabs or filters back and forth does not re-spend
+    // the scarce search API quota; an explicit Refresh bypasses the cache.
+    const [discoverPrefs, setDiscoverPrefs] = useState<DiscoverPrefs>(() => loadPrefs());
+    const [discoverResult, setDiscoverResult] = useState<discover.Result | null>(null);
+    const [discoverLoading, setDiscoverLoading] = useState(false);
+    const discoverCache = useRef<Map<string, discover.Result>>(new Map());
 
     // The scroll container, the latest items, and the persisted read state are
     // held in refs so the scroll handler always sees current values without
@@ -388,7 +498,7 @@ export default function App() {
             container.scrollTop = 0;
             markCaughtUp();
         }
-    }, [items, markCaughtUp]);
+    }, [items, markCaughtUp, view]);
 
     const handleScroll = useCallback(() => {
         if (saveTimer.current) {
@@ -442,6 +552,46 @@ export default function App() {
         }
     }, []);
 
+    // Fetch trending repositories, serving a cached result for the current
+    // (period, language) unless force bypasses it (the Refresh button).
+    const loadTrending = useCallback(async (prefs: DiscoverPrefs, force: boolean) => {
+        const key = `${prefs.period}|${prefs.language}`;
+        if (!force && discoverCache.current.has(key)) {
+            setDiscoverResult(discoverCache.current.get(key)!);
+            return;
+        }
+        setDiscoverLoading(true);
+        setUiError('');
+        try {
+            const result = await FetchTrending(prefs.period, prefs.language);
+            if (result.unauthorized) {
+                setUnauthorized(true);
+            } else {
+                // Only cache good results so a Refresh can recover from an
+                // expired token or a transient rate-limit error.
+                discoverCache.current.set(key, result);
+            }
+            setDiscoverResult(result);
+        } catch (err) {
+            setUiError(String(err));
+        } finally {
+            setDiscoverLoading(false);
+        }
+    }, []);
+
+    const changeDiscoverPrefs = useCallback((next: DiscoverPrefs) => {
+        setDiscoverPrefs(next);
+        savePrefs(next);
+    }, []);
+
+    // Load trending when the Discover tab is shown and whenever its filters
+    // change while it is shown. The cache keeps repeat visits free.
+    useEffect(() => {
+        if (view === 'discover') {
+            loadTrending(discoverPrefs, false);
+        }
+    }, [view, discoverPrefs, loadTrending]);
+
     useEffect(() => {
         GetSettings().then((s) => {
             setSettings(s);
@@ -458,6 +608,12 @@ export default function App() {
     const finishTokenEdit = () => {
         setEditingToken(false);
         setUnauthorized(false);
+        // The cached trending results were fetched with the old token; drop
+        // them so the new token takes effect on the next Discover load.
+        discoverCache.current.clear();
+        if (view === 'discover') {
+            loadTrending(discoverPrefs, true);
+        }
         GetSettings().then((s) => {
             setSettings(s);
             if (s.hasToken && s.users.length > 0) {
@@ -505,10 +661,30 @@ export default function App() {
         }
     };
 
+    // The header Refresh and its spinner track whichever tab is active.
+    const onRefresh = () => (view === 'feed' ? refresh() : loadTrending(discoverPrefs, true));
+    const headerLoading = view === 'feed' ? loading : discoverLoading;
+
     return (
         <div className="app">
             <header className="header">
-                <span className="brand">Octoradar</span>
+                <div className="header-left">
+                    <span className="brand">Octoradar</span>
+                    <nav className="tabs">
+                        <button
+                            className={view === 'feed' ? 'tab active' : 'tab'}
+                            onClick={() => setView('feed')}
+                        >
+                            Feed
+                        </button>
+                        <button
+                            className={view === 'discover' ? 'tab active' : 'tab'}
+                            onClick={() => setView('discover')}
+                        >
+                            Discover
+                        </button>
+                    </nav>
+                </div>
                 <div className="header-actions">
                     <ThemeMenu
                         preference={theme.preference}
@@ -518,11 +694,21 @@ export default function App() {
                     <button className="secondary" onClick={() => setEditingToken(true)}>
                         Re-authenticate
                     </button>
-                    <button className="refresh" onClick={refresh} disabled={loading}>
-                        {loading ? 'Refreshing…' : 'Refresh'}
+                    <button className="refresh" onClick={onRefresh} disabled={headerLoading}>
+                        {headerLoading ? 'Refreshing…' : 'Refresh'}
                     </button>
                 </div>
             </header>
+            {view === 'discover' ? (
+                <DiscoverView
+                    prefs={discoverPrefs}
+                    onChangePrefs={changeDiscoverPrefs}
+                    result={discoverResult}
+                    loading={discoverLoading}
+                    unauthorized={unauthorized}
+                    onUpdateToken={() => setEditingToken(true)}
+                />
+            ) : (
             <div className="layout">
                 <aside className="sidebar">
                     <h2>Following</h2>
@@ -585,6 +771,7 @@ export default function App() {
                     )}
                 </main>
             </div>
+            )}
         </div>
     );
 }
