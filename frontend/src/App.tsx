@@ -15,6 +15,7 @@ import {
     toRef,
     type ReadState,
 } from './readPosition';
+import {loadPreference, resolveTheme, savePreference, type ResolvedTheme, type ThemePreference} from './theme';
 
 // How long after the last scroll event we record the read position, and how
 // close to the top counts as "caught up to the newest item".
@@ -178,6 +179,143 @@ const typeIcons: Record<string, string> = {
     MergedPullRequest: '🔀',
 };
 
+// Reads (window.matchMedia) the current OS dark-mode preference.
+function systemPrefersDark(): boolean {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+// Owns the color-theme preference: applies the resolved theme to <html>,
+// persists the choice, and — while following the OS — re-applies when the OS
+// theme flips. The inline script in index.html applies the theme before this
+// mounts; this keeps it in sync afterwards. The resolved theme is exposed so
+// the header control can show the matching icon.
+function useTheme(): {
+    preference: ThemePreference;
+    resolved: ResolvedTheme;
+    setPreference: (pref: ThemePreference) => void;
+} {
+    const [preference, setPreference] = useState<ThemePreference>(() => loadPreference());
+    const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(preference, systemPrefersDark()));
+
+    const apply = useCallback((theme: ResolvedTheme) => {
+        setResolved(theme);
+        document.documentElement.setAttribute('data-theme', theme);
+    }, []);
+
+    useEffect(() => {
+        apply(resolveTheme(preference, systemPrefersDark()));
+        savePreference(preference);
+    }, [preference, apply]);
+
+    useEffect(() => {
+        if (preference !== 'auto') {
+            return;
+        }
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const onChange = () => apply(resolveTheme('auto', media.matches));
+        media.addEventListener('change', onChange);
+        return () => media.removeEventListener('change', onChange);
+    }, [preference, apply]);
+
+    return {preference, resolved, setPreference};
+}
+
+function SunIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 2.5a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-1.5 0v-.5A.75.75 0 0 1 8 2.5Zm0 9a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-1.5 0v-.5A.75.75 0 0 1 8 11.5Zm5.5-3.5a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5a.75.75 0 0 1 .75.75Zm-9 0a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5a.75.75 0 0 1 .75.75Zm7.39-3.89a.75.75 0 0 1 0 1.06l-.36.36a.75.75 0 1 1-1.06-1.06l.36-.36a.75.75 0 0 1 1.06 0ZM5.18 10.18a.75.75 0 0 1 0 1.06l-.36.36a.75.75 0 1 1-1.06-1.06l.36-.36a.75.75 0 0 1 1.06 0Zm6.3 1.42a.75.75 0 0 1-1.06 0l-.36-.36a.75.75 0 1 1 1.06-1.06l.36.36a.75.75 0 0 1 0 1.06ZM5.18 5.82a.75.75 0 0 1-1.06 0l-.36-.36a.75.75 0 0 1 1.06-1.06l.36.36a.75.75 0 0 1 0 1.06ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+        </svg>
+    );
+}
+
+function MoonIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M9.598 1.591a.75.75 0 0 1 .785-.175 7 7 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.5 5.5 0 1 0 7.678-7.678Z" />
+        </svg>
+    );
+}
+
+// Appearance picker: an icon button (sun/moon for the active theme) that opens
+// a small popover to choose Auto / Light / Dark.
+function ThemeMenu({
+    preference,
+    resolved,
+    onSelect,
+}: {
+    preference: ThemePreference;
+    resolved: ResolvedTheme;
+    onSelect: (pref: ThemePreference) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    // Close on outside click or Escape while the popover is open.
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+        const onPointerDown = (e: PointerEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setOpen(false);
+            }
+        };
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open]);
+
+    const options: {value: ThemePreference; label: string}[] = [
+        {value: 'auto', label: 'Auto'},
+        {value: 'light', label: 'Light'},
+        {value: 'dark', label: 'Dark'},
+    ];
+
+    return (
+        <div className="theme-menu" ref={ref}>
+            <button
+                className="secondary theme-toggle"
+                aria-label="Color theme"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen((o) => !o)}
+            >
+                {resolved === 'dark' ? <MoonIcon /> : <SunIcon />}
+            </button>
+            {open && (
+                <ul className="theme-popover" role="menu">
+                    {options.map((opt) => (
+                        <li key={opt.value} role="none">
+                            <button
+                                role="menuitemradio"
+                                aria-checked={preference === opt.value}
+                                className={preference === opt.value ? 'active' : ''}
+                                onClick={() => {
+                                    onSelect(opt.value);
+                                    setOpen(false);
+                                }}
+                            >
+                                <span className="check" aria-hidden="true">
+                                    {preference === opt.value ? '✓' : ''}
+                                </span>
+                                {opt.label}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 function FeedItem({item}: {item: feed.Item}) {
     return (
         <li className="feed-item" data-item-id={item.id}>
@@ -273,9 +411,9 @@ function DiscoverView({
             <main className="feed">
                 {unauthorized && (
                     <div className="error banner auth-banner">
-                        <span>Your GitHub token is invalid or expired. Update it to keep discovering.</span>
+                        <span>Your GitHub session has expired. Re-authenticate to keep discovering.</span>
                         <button className="secondary" onClick={onUpdateToken}>
-                            Update token
+                            Re-authenticate
                         </button>
                     </div>
                 )}
@@ -313,6 +451,7 @@ export default function App() {
     const [newUser, setNewUser] = useState('');
     const [newCount, setNewCount] = useState(0);
     const [view, setView] = useState<'feed' | 'discover'>('feed');
+    const theme = useTheme();
 
     // Discover (trending) state. Results are cached per (period, language) for
     // the session so flipping tabs or filters back and forth does not re-spend
@@ -547,6 +686,11 @@ export default function App() {
                     </nav>
                 </div>
                 <div className="header-actions">
+                    <ThemeMenu
+                        preference={theme.preference}
+                        resolved={theme.resolved}
+                        onSelect={theme.setPreference}
+                    />
                     <button className="secondary" onClick={() => setEditingToken(true)}>
                         Re-authenticate
                     </button>
