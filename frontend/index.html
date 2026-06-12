@@ -4,6 +4,26 @@
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Octoradar</title>
+    <script>
+        // Resolve and apply the color theme before first paint so a dark-mode
+        // launch never flashes light. This mirrors the minimal logic of
+        // src/theme.ts; the storage key and attribute values must stay in sync.
+        (function () {
+            try {
+                var pref = localStorage.getItem('octoradar.theme.v1');
+                if (pref !== 'light' && pref !== 'dark' && pref !== 'auto') {
+                    pref = 'auto';
+                }
+                var resolved = pref;
+                if (pref === 'auto') {
+                    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                document.documentElement.setAttribute('data-theme', resolved);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
 </head>
 <body>
 <div id="root"></div>
