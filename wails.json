@@ -2,6 +2,9 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "octoradar",
   "outputfilename": "octoradar",
+  "info": {
+    "productName": "Octoradar"
+  },
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm build",
   "frontend:dev:watcher": "pnpm dev",
