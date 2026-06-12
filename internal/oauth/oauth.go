@@ -6,14 +6,41 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
 const defaultBaseURL = "https://github.com"
+
+// clientIDEnv overrides the build-time client ID, which is convenient during
+// development before any build flags are wired up.
+const clientIDEnv = "OCTORADAR_CLIENT_ID"
+
+// BuildClientID is the OAuth app's client ID, injected at build time via
+//
+//	-ldflags "-X github.com/tnagatomi/octoradar/internal/oauth.BuildClientID=<id>"
+//
+// A device flow client ID is not a secret, so shipping it in the binary is
+// safe.
+var BuildClientID string
+
+// ClientID returns the OAuth app client ID, preferring the OCTORADAR_CLIENT_ID
+// environment variable over the build-time value. It errors when neither is
+// set, since the device flow cannot start without one.
+func ClientID() (string, error) {
+	if v := os.Getenv(clientIDEnv); v != "" {
+		return v, nil
+	}
+	if BuildClientID != "" {
+		return BuildClientID, nil
+	}
+	return "", errors.New("no OAuth client ID configured; set " + clientIDEnv + " or build with -ldflags -X")
+}
 
 // Client performs the GitHub device flow for a single OAuth app.
 type Client struct {

@@ -226,6 +226,44 @@ func TestPollAccessTokenCancelled(t *testing.T) {
 	}
 }
 
+func TestClientIDPrefersEnv(t *testing.T) {
+	defer func(prev string) { BuildClientID = prev }(BuildClientID)
+	BuildClientID = "build-id"
+	t.Setenv("OCTORADAR_CLIENT_ID", "env-id")
+
+	got, err := ClientID()
+	if err != nil {
+		t.Fatalf("ClientID: %v", err)
+	}
+	if got != "env-id" {
+		t.Errorf("ClientID = %q, want env-id (env overrides build var)", got)
+	}
+}
+
+func TestClientIDFallsBackToBuildVar(t *testing.T) {
+	defer func(prev string) { BuildClientID = prev }(BuildClientID)
+	BuildClientID = "build-id"
+	t.Setenv("OCTORADAR_CLIENT_ID", "")
+
+	got, err := ClientID()
+	if err != nil {
+		t.Fatalf("ClientID: %v", err)
+	}
+	if got != "build-id" {
+		t.Errorf("ClientID = %q, want build-id", got)
+	}
+}
+
+func TestClientIDUnset(t *testing.T) {
+	defer func(prev string) { BuildClientID = prev }(BuildClientID)
+	BuildClientID = ""
+	t.Setenv("OCTORADAR_CLIENT_ID", "")
+
+	if _, err := ClientID(); err == nil {
+		t.Fatal("expected an error when no client ID is configured, got nil")
+	}
+}
+
 func TestRequestDeviceCodeError(t *testing.T) {
 	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

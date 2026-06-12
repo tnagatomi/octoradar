@@ -10,6 +10,7 @@ import (
 	"github.com/tnagatomi/octoradar/internal/config"
 	"github.com/tnagatomi/octoradar/internal/feed"
 	"github.com/tnagatomi/octoradar/internal/github"
+	"github.com/tnagatomi/octoradar/internal/oauth"
 )
 
 // App exposes backend operations to the frontend.
@@ -65,6 +66,13 @@ func (a *App) SetToken(token string) (string, error) {
 	if token == "" {
 		return "", fmt.Errorf("token is empty")
 	}
+	return a.validateAndSaveToken(token)
+}
+
+// validateAndSaveToken confirms the token works by resolving the viewer,
+// then persists it and returns the authenticated user's login. It is shared
+// by the manual token entry and the device flow.
+func (a *App) validateAndSaveToken(token string) (string, error) {
 	login, err := github.NewClient(token).Viewer(a.ctx)
 	if err != nil {
 		return "", fmt.Errorf("token validation failed: %w", err)
@@ -77,6 +85,56 @@ func (a *App) SetToken(token string) (string, error) {
 		return "", err
 	}
 	return login, nil
+}
+
+// DeviceLogin is the device flow prompt shown to the user. The user visits
+// VerificationURI and enters UserCode; DeviceCode is opaque and passed back
+// to CompleteDeviceLogin unchanged.
+type DeviceLogin struct {
+	UserCode        string `json:"userCode"`
+	VerificationURI string `json:"verificationUri"`
+	DeviceCode      string `json:"deviceCode"`
+	ExpiresIn       int    `json:"expiresIn"`
+	Interval        int    `json:"interval"`
+}
+
+// StartDeviceLogin begins the OAuth device flow and returns the codes the
+// user needs to authorize the app in their browser.
+func (a *App) StartDeviceLogin() (DeviceLogin, error) {
+	clientID, err := oauth.ClientID()
+	if err != nil {
+		return DeviceLogin{}, err
+	}
+	dc, err := oauth.NewClient(clientID).RequestDeviceCode(a.ctx)
+	if err != nil {
+		return DeviceLogin{}, err
+	}
+	return DeviceLogin{
+		UserCode:        dc.UserCode,
+		VerificationURI: dc.VerificationURI,
+		DeviceCode:      dc.DeviceCode,
+		ExpiresIn:       dc.ExpiresIn,
+		Interval:        dc.Interval,
+	}, nil
+}
+
+// CompleteDeviceLogin blocks until the user authorizes the device, then
+// validates and persists the resulting token and returns the login. The
+// frontend calls it with the values from StartDeviceLogin.
+func (a *App) CompleteDeviceLogin(deviceCode string, interval, expiresIn int) (string, error) {
+	clientID, err := oauth.ClientID()
+	if err != nil {
+		return "", err
+	}
+	token, err := oauth.NewClient(clientID).PollAccessToken(a.ctx, &oauth.DeviceCode{
+		DeviceCode: deviceCode,
+		Interval:   interval,
+		ExpiresIn:  expiresIn,
+	})
+	if err != nil {
+		return "", err
+	}
+	return a.validateAndSaveToken(token)
 }
 
 // maxUsers caps the followed user list. Every refresh fans out one events
