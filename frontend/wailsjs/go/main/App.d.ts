@@ -5,6 +5,8 @@ import {feed} from '../models';
 
 export function AddUser(arg1:string):Promise<main.Settings>;
 
+export function CompleteDeviceLogin(arg1:string,arg2:number,arg3:number):Promise<string>;
+
 export function FetchFeed():Promise<feed.Result>;
 
 export function FetchUserFeed(arg1:string):Promise<feed.Result>;
@@ -14,3 +16,5 @@ export function GetSettings():Promise<main.Settings>;
 export function RemoveUser(arg1:string):Promise<main.Settings>;
 
 export function SetToken(arg1:string):Promise<string>;
+
+export function StartDeviceLogin():Promise<main.DeviceLogin>;
