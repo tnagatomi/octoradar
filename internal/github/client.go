@@ -45,6 +45,9 @@ func IsUnauthorized(err error) bool {
 type Client struct {
 	httpClient *http.Client
 	token      string
+	// baseURL is the API root. It defaults to the public API and is only
+	// overridden in tests to point at a local server.
+	baseURL string
 }
 
 // NewClient returns a client that authenticates with the given token.
@@ -52,6 +55,7 @@ func NewClient(token string) *Client {
 	return &Client{
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		token:      token,
+		baseURL:    baseURL,
 	}
 }
 
@@ -197,7 +201,7 @@ func (c *Client) UserExists(ctx context.Context, username string) error {
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}

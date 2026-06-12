@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/tnagatomi/octoradar/internal/config"
+	"github.com/tnagatomi/octoradar/internal/discover"
 	"github.com/tnagatomi/octoradar/internal/feed"
 	"github.com/tnagatomi/octoradar/internal/github"
 	"github.com/tnagatomi/octoradar/internal/oauth"
@@ -251,4 +252,15 @@ func (a *App) FetchUserFeed(username string) feed.Result {
 	a.mu.Unlock()
 
 	return feed.FetchEvents(a.ctx, github.NewClient(token), []string{username})
+}
+
+// FetchTrending retrieves trending repositories for the given period and
+// language. period is "week", "month", or "quarter"; an empty language spans
+// all languages. Unlike the feed, no user list is needed: trending is global.
+func (a *App) FetchTrending(period string, language string) discover.Result {
+	a.mu.Lock()
+	token := a.cfg.Token
+	a.mu.Unlock()
+
+	return discover.Fetch(a.ctx, github.NewClient(token), period, language)
 }

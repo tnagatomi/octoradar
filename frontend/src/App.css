@@ -19,10 +19,42 @@
     font-size: 16px;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
 .header-actions {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Tabs sit next to the brand as text buttons with an underline on the active
+   one, echoing GitHub's underline-nav. */
+.tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.tabs .tab {
+    padding: 6px 12px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+}
+
+.tabs .tab:hover {
+    color: var(--text);
+}
+
+.tabs .tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent-emphasis);
 }
 
 /* Appearance picker: an icon button that opens a small popover menu. */
@@ -296,6 +328,125 @@ button:focus-visible {
 .user-list .remove:hover {
     color: var(--red);
     background-color: var(--btn-hover-bg);
+}
+
+/* Discover filters */
+
+/* Segmented period control: a single bordered row of toggle buttons. */
+.segmented {
+    display: flex;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.segmented .segment {
+    flex: 1;
+    padding: 5px 8px;
+    border: none;
+    border-left: 1px solid var(--border);
+    background-color: var(--bg);
+    color: var(--text);
+    border-radius: 0;
+    font-size: 13px;
+}
+
+.segmented .segment:first-child {
+    border-left: none;
+}
+
+.segmented .segment:hover:not(.active) {
+    background-color: var(--btn-hover-bg);
+}
+
+.segmented .segment.active {
+    background-color: var(--accent-emphasis);
+    color: var(--on-emphasis);
+}
+
+.field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.language-select {
+    width: 100%;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: var(--bg);
+    color: var(--text);
+    margin-bottom: 16px;
+}
+
+.language-select:focus {
+    outline: none;
+    border-color: var(--accent-emphasis);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Discover results */
+
+.repo-list {
+    list-style: none;
+    margin: 0 auto;
+    padding: 0;
+    max-width: 720px;
+    background-color: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.repo-card {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-muted);
+}
+
+.repo-card:last-child {
+    border-bottom: none;
+}
+
+.repo-body {
+    min-width: 0;
+}
+
+.repo-name {
+    font-weight: 600;
+    color: var(--accent);
+    overflow-wrap: anywhere;
+}
+
+.repo-name:hover {
+    text-decoration: underline;
+}
+
+.repo-desc {
+    margin: 4px 0 0;
+    color: var(--text);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.repo-meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.repo-lang {
+    font-weight: 500;
 }
 
 /* Feed */
