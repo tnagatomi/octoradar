@@ -108,6 +108,7 @@ export namespace main {
 	}
 	export class Settings {
 	    hasToken: boolean;
+	    login: string;
 	    users: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -117,6 +118,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hasToken = source["hasToken"];
+	        this.login = source["login"];
 	        this.users = source["users"];
 	    }
 	}

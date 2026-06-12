@@ -41,6 +41,7 @@ func (a *App) startup(ctx context.Context) {
 // itself never crosses the bridge.
 type Settings struct {
 	HasToken bool     `json:"hasToken"`
+	Login    string   `json:"login"`
 	Users    []string `json:"users"`
 }
 
@@ -58,8 +59,23 @@ func (a *App) settingsLocked() Settings {
 	}
 	return Settings{
 		HasToken: a.cfg.Token != "",
+		Login:    a.cfg.Login,
 		Users:    users,
 	}
+}
+
+// SignOut clears the stored token and login, removing the keychain entry, so
+// the app returns to the signed-out state. The follow list is kept so it is
+// restored after the next sign in.
+func (a *App) SignOut() (Settings, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Token = ""
+	a.cfg.Login = ""
+	if err := a.cfg.Save(); err != nil {
+		return a.settingsLocked(), err
+	}
+	return a.settingsLocked(), nil
 }
 
 // validateAndSaveToken confirms the token works by resolving the viewer,
@@ -74,6 +90,7 @@ func (a *App) validateAndSaveToken(token string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfg.Token = token
+	a.cfg.Login = login
 	if err := a.cfg.Save(); err != nil {
 		return "", err
 	}
