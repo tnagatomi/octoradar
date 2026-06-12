@@ -7,14 +7,14 @@
 // without a DOM.
 
 // Period selects the creation window the backend searches within. The labels
-// shown in the UI ("This week/month/quarter") stay honest about the span; the
-// backend maps these values to practical day counts.
+// shown in the UI ("Weekly/Monthly/Quarterly") name the cadence; the backend
+// maps these values to practical day counts.
 export type Period = 'week' | 'month' | 'quarter';
 
 export const PERIODS: ReadonlyArray<{value: Period; label: string}> = [
-    {value: 'week', label: 'This week'},
-    {value: 'month', label: 'This month'},
-    {value: 'quarter', label: 'This quarter'},
+    {value: 'week', label: 'Weekly'},
+    {value: 'month', label: 'Monthly'},
+    {value: 'quarter', label: 'Quarterly'},
 ];
 
 // The fixed language filter list. An empty value spans all languages.
