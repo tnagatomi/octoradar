@@ -4,6 +4,12 @@ A small desktop app for keeping an eye on GitHub. Follow a set of users to get a
 
 Octoradar is built with [Wails](https://wails.io/) (Go + React). It signs in through GitHub's OAuth device flow and stores your access token in the OS keychain — never in plain text on disk.
 
+## Screenshots
+
+| Feed | Discover |
+| --- | --- |
+| [![A unified activity feed for the users you follow](docs/images/feed.png)](docs/images/feed.png) | [![Trending repositories in the Discover tab](docs/images/discover.png)](docs/images/discover.png) |
+
 ## Install
 
 Download the latest build for your platform from the [Releases page](https://github.com/tnagatomi/octoradar/releases).
