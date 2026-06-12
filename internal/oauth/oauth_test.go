@@ -64,6 +64,89 @@ func TestRequestDeviceCode(t *testing.T) {
 	}
 }
 
+func TestPollOnceSuccess(t *testing.T) {
+	var gotPath, gotGrantType, gotDeviceCode string
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = r.ParseForm()
+		gotGrantType = r.Form.Get("grant_type")
+		gotDeviceCode = r.Form.Get("device_code")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"gho_token","token_type":"bearer","scope":""}`))
+	})
+
+	token, slowDown, err := c.pollOnce(context.Background(), "dev-abc")
+	if err != nil {
+		t.Fatalf("pollOnce: %v", err)
+	}
+	if token != "gho_token" {
+		t.Errorf("token = %q, want gho_token", token)
+	}
+	if slowDown {
+		t.Error("slowDown = true, want false on success")
+	}
+	if gotPath != "/login/oauth/access_token" {
+		t.Errorf("path = %q, want /login/oauth/access_token", gotPath)
+	}
+	if gotGrantType != "urn:ietf:params:oauth:grant-type:device_code" {
+		t.Errorf("grant_type = %q", gotGrantType)
+	}
+	if gotDeviceCode != "dev-abc" {
+		t.Errorf("device_code = %q, want dev-abc", gotDeviceCode)
+	}
+}
+
+func TestPollOncePending(t *testing.T) {
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"authorization_pending","error_description":"pending"}`))
+	})
+
+	token, slowDown, err := c.pollOnce(context.Background(), "dev-abc")
+	if err != nil {
+		t.Fatalf("pending must not be terminal, got err: %v", err)
+	}
+	if token != "" {
+		t.Errorf("token = %q, want empty while pending", token)
+	}
+	if slowDown {
+		t.Error("slowDown = true, want false for authorization_pending")
+	}
+}
+
+func TestPollOnceSlowDown(t *testing.T) {
+	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"slow_down","interval":10}`))
+	})
+
+	token, slowDown, err := c.pollOnce(context.Background(), "dev-abc")
+	if err != nil {
+		t.Fatalf("slow_down must not be terminal, got err: %v", err)
+	}
+	if token != "" {
+		t.Errorf("token = %q, want empty on slow_down", token)
+	}
+	if !slowDown {
+		t.Error("slowDown = false, want true for slow_down")
+	}
+}
+
+func TestPollOnceTerminalError(t *testing.T) {
+	for _, code := range []string{"access_denied", "expired_token"} {
+		t.Run(code, func(t *testing.T) {
+			c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"error":"` + code + `","error_description":"terminal"}`))
+			})
+
+			if _, _, err := c.pollOnce(context.Background(), "dev-abc"); err == nil {
+				t.Fatalf("%s must be terminal, got nil error", code)
+			}
+		})
+	}
+}
+
 func TestRequestDeviceCodeError(t *testing.T) {
 	c := newTestClient(t, "cid-123", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

@@ -71,6 +71,39 @@ func (c *Client) RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 	}, nil
 }
 
+const grantTypeDeviceCode = "urn:ietf:params:oauth:grant-type:device_code"
+
+// pollOnce performs one token-exchange request. A non-empty token means
+// authorization succeeded. A nil error with an empty token means the user
+// has not finished authorizing yet; slowDown is true when the server asked
+// the caller to back off and lengthen its polling interval. A non-nil error
+// is terminal and polling must stop.
+func (c *Client) pollOnce(ctx context.Context, deviceCode string) (token string, slowDown bool, err error) {
+	form := url.Values{
+		"client_id":   {c.clientID},
+		"device_code": {deviceCode},
+		"grant_type":  {grantTypeDeviceCode},
+	}
+	var body struct {
+		AccessToken      string `json:"access_token"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if err := c.postForm(ctx, "/login/oauth/access_token", form, &body); err != nil {
+		return "", false, err
+	}
+	switch {
+	case body.AccessToken != "":
+		return body.AccessToken, false, nil
+	case body.Error == "authorization_pending":
+		return "", false, nil
+	case body.Error == "slow_down":
+		return "", true, nil
+	default:
+		return "", false, fmt.Errorf("device authorization failed: %s", errorMessage(body.Error, body.ErrorDescription))
+	}
+}
+
 // errorMessage prefers GitHub's human-readable description over the error
 // code when both are present.
 func errorMessage(code, description string) string {
