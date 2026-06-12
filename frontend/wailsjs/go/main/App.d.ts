@@ -6,6 +6,10 @@ import {discover} from '../models';
 
 export function AddUser(arg1:string):Promise<main.Settings>;
 
+export function CancelDeviceLogin():Promise<void>;
+
+export function CompleteDeviceLogin(arg1:string,arg2:number,arg3:number):Promise<string>;
+
 export function FetchFeed():Promise<feed.Result>;
 
 export function FetchTrending(arg1:string,arg2:string):Promise<discover.Result>;
@@ -16,4 +20,4 @@ export function GetSettings():Promise<main.Settings>;
 
 export function RemoveUser(arg1:string):Promise<main.Settings>;
 
-export function SetToken(arg1:string):Promise<string>;
+export function StartDeviceLogin():Promise<main.DeviceLogin>;

@@ -537,6 +537,32 @@ button:focus-visible {
     border-color: var(--border);
 }
 
+.device-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.device-code-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.device-code {
+    flex: 1;
+    padding: 12px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 28px;
+    letter-spacing: 4px;
+    font-weight: 600;
+    background-color: var(--canvas-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    user-select: all;
+}
+
 /* Shared */
 
 .error {

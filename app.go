@@ -11,6 +11,7 @@ import (
 	"github.com/tnagatomi/octoradar/internal/discover"
 	"github.com/tnagatomi/octoradar/internal/feed"
 	"github.com/tnagatomi/octoradar/internal/github"
+	"github.com/tnagatomi/octoradar/internal/oauth"
 )
 
 // App exposes backend operations to the frontend.
@@ -19,6 +20,9 @@ type App struct {
 
 	mu  sync.Mutex
 	cfg *config.Config
+	// cancelLogin stops the in-progress device login poll, if any. It is set
+	// while CompleteDeviceLogin is waiting and cleared when it returns.
+	cancelLogin context.CancelFunc
 }
 
 // NewApp creates a new App application struct.
@@ -59,13 +63,10 @@ func (a *App) settingsLocked() Settings {
 	}
 }
 
-// SetToken validates the token against the API, persists it, and returns
-// the authenticated user's login.
-func (a *App) SetToken(token string) (string, error) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return "", fmt.Errorf("token is empty")
-	}
+// validateAndSaveToken confirms the token works by resolving the viewer,
+// then persists it and returns the authenticated user's login. It is the
+// final step of the device flow, after polling yields a token.
+func (a *App) validateAndSaveToken(token string) (string, error) {
 	login, err := github.NewClient(token).Viewer(a.ctx)
 	if err != nil {
 		return "", fmt.Errorf("token validation failed: %w", err)
@@ -78,6 +79,79 @@ func (a *App) SetToken(token string) (string, error) {
 		return "", err
 	}
 	return login, nil
+}
+
+// DeviceLogin is the device flow prompt shown to the user. The user visits
+// VerificationURI and enters UserCode; DeviceCode is opaque and passed back
+// to CompleteDeviceLogin unchanged.
+type DeviceLogin struct {
+	UserCode        string `json:"userCode"`
+	VerificationURI string `json:"verificationUri"`
+	DeviceCode      string `json:"deviceCode"`
+	ExpiresIn       int    `json:"expiresIn"`
+	Interval        int    `json:"interval"`
+}
+
+// StartDeviceLogin begins the OAuth device flow and returns the codes the
+// user needs to authorize the app in their browser.
+func (a *App) StartDeviceLogin() (DeviceLogin, error) {
+	clientID, err := oauth.ClientID()
+	if err != nil {
+		return DeviceLogin{}, err
+	}
+	dc, err := oauth.NewClient(clientID).RequestDeviceCode(a.ctx)
+	if err != nil {
+		return DeviceLogin{}, err
+	}
+	return DeviceLogin{
+		UserCode:        dc.UserCode,
+		VerificationURI: dc.VerificationURI,
+		DeviceCode:      dc.DeviceCode,
+		ExpiresIn:       dc.ExpiresIn,
+		Interval:        dc.Interval,
+	}, nil
+}
+
+// CompleteDeviceLogin blocks until the user authorizes the device, then
+// validates and persists the resulting token and returns the login. The
+// frontend calls it with the values from StartDeviceLogin.
+func (a *App) CompleteDeviceLogin(deviceCode string, interval, expiresIn int) (string, error) {
+	clientID, err := oauth.ClientID()
+	if err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.mu.Lock()
+	a.cancelLogin = cancel
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.cancelLogin = nil
+		a.mu.Unlock()
+		cancel()
+	}()
+
+	token, err := oauth.NewClient(clientID).PollAccessToken(ctx, &oauth.DeviceCode{
+		DeviceCode: deviceCode,
+		Interval:   interval,
+		ExpiresIn:  expiresIn,
+	})
+	if err != nil {
+		return "", err
+	}
+	return a.validateAndSaveToken(token)
+}
+
+// CancelDeviceLogin stops an in-progress device login poll, if any, so the
+// backend stops waiting once the user backs out of the sign-in screen.
+func (a *App) CancelDeviceLogin() {
+	a.mu.Lock()
+	cancel := a.cancelLogin
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // maxUsers caps the followed user list. Every refresh fans out one events

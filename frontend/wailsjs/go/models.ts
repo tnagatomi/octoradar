@@ -151,6 +151,26 @@ export namespace feed {
 
 export namespace main {
 	
+	export class DeviceLogin {
+	    userCode: string;
+	    verificationUri: string;
+	    deviceCode: string;
+	    expiresIn: number;
+	    interval: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeviceLogin(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.userCode = source["userCode"];
+	        this.verificationUri = source["verificationUri"];
+	        this.deviceCode = source["deviceCode"];
+	        this.expiresIn = source["expiresIn"];
+	        this.interval = source["interval"];
+	    }
+	}
 	export class Settings {
 	    hasToken: boolean;
 	    users: string[];
