@@ -23,7 +23,7 @@ const TOP_THRESHOLD = 4;
 // The scroll container, the latest items, and the persisted read state are held
 // in refs so the scroll handler always sees current values without being
 // re-created on every render.
-export function useFeedReadPosition(items: feed.Item[], view: 'feed' | 'discover') {
+export function useFeedReadPosition(items: feed.Item[], view: 'feed' | 'discover' | 'reactions') {
     const [newCount, setNewCount] = useState(0);
 
     const feedRef = useRef<HTMLElement>(null);

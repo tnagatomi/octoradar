@@ -1,4 +1,4 @@
-import {feed} from '../../wailsjs/go/models';
+import {feed, notifications} from '../../wailsjs/go/models';
 import {absoluteTime, relativeTime} from '../utils/time';
 import {ExternalLink} from './ExternalLink';
 
@@ -12,7 +12,9 @@ const typeIcons: Record<string, string> = {
     MergedPullRequest: '🔀',
 };
 
-export function FeedItem({item}: {item: feed.Item}) {
+// Reaction items share the feed item's shape, so the same row renders both
+// the activity feed and the Reactions tab.
+export function FeedItem({item}: {item: feed.Item | notifications.Item}) {
     return (
         <li className="feed-item" data-item-id={item.id}>
             <img className="avatar" src={item.avatarUrl} alt="" />
