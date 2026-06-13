@@ -3,6 +3,7 @@
 import {main} from '../models';
 import {feed} from '../models';
 import {discover} from '../models';
+import {notifications} from '../models';
 
 export function AddUser(arg1:string):Promise<main.Settings>;
 
@@ -17,6 +18,10 @@ export function FetchTrending(arg1:string,arg2:string):Promise<discover.Result>;
 export function FetchUserFeed(arg1:string):Promise<feed.Result>;
 
 export function GetSettings():Promise<main.Settings>;
+
+export function MarkReactionsRead():Promise<void>;
+
+export function PollReactions():Promise<notifications.Result>;
 
 export function RemoveUser(arg1:string):Promise<main.Settings>;
 

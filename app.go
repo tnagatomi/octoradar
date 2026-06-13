@@ -11,6 +11,7 @@ import (
 	"github.com/tnagatomi/octoradar/internal/discover"
 	"github.com/tnagatomi/octoradar/internal/feed"
 	"github.com/tnagatomi/octoradar/internal/github"
+	"github.com/tnagatomi/octoradar/internal/notifications"
 	"github.com/tnagatomi/octoradar/internal/oauth"
 )
 
@@ -23,11 +24,17 @@ type App struct {
 	// cancelLogin stops the in-progress device login poll, if any. It is set
 	// while CompleteDeviceLogin is waiting and cleared when it returns.
 	cancelLogin context.CancelFunc
+
+	// notifMu guards notif and serializes reaction polls so an interval poll
+	// and a manual refresh cannot interleave. It is separate from mu so a slow
+	// poll's network I/O does not block settings operations.
+	notifMu sync.Mutex
+	notif   *notifications.State
 }
 
 // NewApp creates a new App application struct.
 func NewApp() *App {
-	return &App{cfg: &config.Config{}}
+	return &App{cfg: &config.Config{}, notif: &notifications.State{}}
 }
 
 // startup is called when the app starts.
@@ -35,6 +42,9 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if cfg, err := config.Load(); err == nil {
 		a.cfg = cfg
+	}
+	if st, err := notifications.Load(); err == nil {
+		a.notif = st
 	}
 }
 
@@ -257,6 +267,33 @@ func (a *App) FetchUserFeed(username string) feed.Result {
 	a.mu.Unlock()
 
 	return feed.FetchEvents(a.ctx, github.NewClient(token), []string{username})
+}
+
+// PollReactions scans the user's repositories for new stars and forks and
+// returns the current reaction list with the unread tally. The frontend calls
+// it on an interval and on manual refresh; the result is persisted so the list
+// and unread count survive restarts.
+func (a *App) PollReactions() notifications.Result {
+	a.mu.Lock()
+	token := a.cfg.Token
+	a.mu.Unlock()
+
+	a.notifMu.Lock()
+	defer a.notifMu.Unlock()
+	res := notifications.Poll(a.ctx, github.NewClient(token), a.notif)
+	if err := a.notif.Save(); err != nil {
+		res.Errors = append(res.Errors, fmt.Sprintf("saving reactions: %v", err))
+	}
+	return res
+}
+
+// MarkReactionsRead marks every reaction as seen, clearing the unread badge.
+// The frontend calls it when the Reactions tab is opened.
+func (a *App) MarkReactionsRead() {
+	a.notifMu.Lock()
+	defer a.notifMu.Unlock()
+	notifications.MarkRead(a.notif)
+	_ = a.notif.Save()
 }
 
 // FetchTrending retrieves trending repositories for the given period and

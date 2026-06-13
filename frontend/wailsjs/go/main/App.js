@@ -30,6 +30,14 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function MarkReactionsRead() {
+  return window['go']['main']['App']['MarkReactionsRead']();
+}
+
+export function PollReactions() {
+  return window['go']['main']['App']['PollReactions']();
+}
+
 export function RemoveUser(arg1) {
   return window['go']['main']['App']['RemoveUser'](arg1);
 }
