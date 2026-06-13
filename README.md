@@ -1,6 +1,6 @@
 # Octoradar
 
-A small desktop app for keeping an eye on GitHub. Follow a set of users to get a unified feed of their public activity and merged pull requests, and browse trending repositories from the Discover tab.
+A small desktop app for keeping an eye on GitHub. Follow a set of users to get a unified feed of their public activity and merged pull requests, browse trending repositories from the Discover tab, and watch the Reactions tab for stars and forks on your own repositories.
 
 Octoradar is built with [Wails](https://wails.io/) (Go + React). It signs in through GitHub's OAuth device flow and stores your access token in the OS keychain — never in plain text on disk.
 
@@ -47,7 +47,7 @@ A plain `.tar.gz` is also provided for other distributions; extract it and run t
 
 1. Launch Octoradar and sign in: it shows a one-time code to enter at the GitHub URL it opens in your browser.
 2. Add the GitHub usernames you want to follow.
-3. Watch the **Feed** for their activity, or switch to **Discover** for trending repositories.
+3. Watch the **Feed** for their activity, switch to **Discover** for trending repositories, or open **Reactions** to see stars and forks on your own repositories.
 
 ## Build from source
 
