@@ -35,4 +35,12 @@ Run inside `frontend/`:
 - `pnpm install` — install dependencies (uses the pinned `packageManager` version).
 - `pnpm dev` — Vite dev server.
 - `pnpm build` — `tsc` type check followed by `vite build`.
-- `pnpm test` — run Vitest.
+- `pnpm test` — run Vitest (both projects below).
+- `pnpm test:unit` — pure-logic tests only (`*.test.ts`, Node environment).
+- `pnpm test:component` — React component/hook tests only (`*.test.tsx`, jsdom).
+
+Vitest is split into two projects (see `vitest.config.ts`): `unit` for
+pure-logic tests and `components` for component/hook tests. Component tests use
+React Testing Library; they mock the generated `wailsjs/` bindings at the module
+boundary and share fixtures and the jsdom setup under `src/test/`. CI runs the
+two projects as separate jobs.
