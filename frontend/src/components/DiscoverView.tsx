@@ -23,7 +23,7 @@ export function DiscoverView({
     const feedRef = useRef<HTMLElement>(null);
     useEffect(() => {
         feedRef.current?.scrollTo(0, 0);
-    }, [prefs.period, prefs.language]);
+    }, [result]);
     return (
         <div className="layout">
             <aside className="sidebar">
