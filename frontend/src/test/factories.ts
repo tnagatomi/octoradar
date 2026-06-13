@@ -1,7 +1,7 @@
 // Builders for the Wails model objects the UI renders. Each takes partial
 // overrides on top of a sensible default so a test only states the fields it
 // cares about.
-import {discover, feed, main} from '../../wailsjs/go/models';
+import {discover, feed, main, notifications} from '../../wailsjs/go/models';
 
 let seq = 0;
 
@@ -53,6 +53,33 @@ export function makeDiscoverResult(overrides: Partial<discover.Result> = {}): di
         repositories: [],
         errors: [],
         unauthorized: false,
+        ...overrides,
+    });
+}
+
+// A reaction item: someone starred or forked one of the user's repos.
+export function makeReactionItem(overrides: Partial<notifications.Item> = {}): notifications.Item {
+    seq += 1;
+    return notifications.Item.createFrom({
+        id: `reaction-${seq}`,
+        actor: 'mona',
+        avatarUrl: 'https://example.test/mona.png',
+        type: 'WatchEvent',
+        action: 'starred',
+        target: 'octocat/hello-world',
+        targetUrl: 'https://github.com/octocat/hello-world',
+        trailer: '',
+        createdAt: '2020-01-01T00:00:00Z',
+        ...overrides,
+    });
+}
+
+export function makeReactionsResult(overrides: Partial<notifications.Result> = {}): notifications.Result {
+    return notifications.Result.createFrom({
+        items: [],
+        errors: [],
+        unauthorized: false,
+        unreadCount: 0,
         ...overrides,
     });
 }

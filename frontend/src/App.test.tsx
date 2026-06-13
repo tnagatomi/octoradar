@@ -2,7 +2,15 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import {makeDiscoverResult, makeFeedResult, makeItem, makeRepository, makeSettings} from './test/factories';
+import {
+    makeDiscoverResult,
+    makeFeedResult,
+    makeItem,
+    makeReactionItem,
+    makeReactionsResult,
+    makeRepository,
+    makeSettings,
+} from './test/factories';
 
 // App orchestrates the whole UI on top of the Wails backend; mock the backend
 // bindings and the browser bridge so these tests cover the real wiring between
@@ -15,6 +23,8 @@ vi.mock('../wailsjs/go/main/App', () => ({
     RemoveUser: vi.fn(),
     SignOut: vi.fn(),
     Version: vi.fn(),
+    PollReactions: vi.fn(),
+    MarkReactionsRead: vi.fn(),
     // Pulled in by TokenSetup, reached on the re-auth path.
     StartDeviceLogin: vi.fn(),
     CompleteDeviceLogin: vi.fn(),
@@ -25,7 +35,14 @@ vi.mock('../wailsjs/runtime/runtime', () => ({
     ClipboardSetText: vi.fn().mockResolvedValue(undefined),
 }));
 
-import {FetchFeed, FetchTrending, GetSettings, Version} from '../wailsjs/go/main/App';
+import {
+    FetchFeed,
+    FetchTrending,
+    GetSettings,
+    MarkReactionsRead,
+    PollReactions,
+    Version,
+} from '../wailsjs/go/main/App';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -52,6 +69,8 @@ beforeEach(() => {
     vi.mocked(Version).mockResolvedValue('1.2.3');
     vi.mocked(FetchFeed).mockResolvedValue(makeFeedResult());
     vi.mocked(FetchTrending).mockResolvedValue(makeDiscoverResult());
+    vi.mocked(PollReactions).mockResolvedValue(makeReactionsResult());
+    vi.mocked(MarkReactionsRead).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -124,6 +143,66 @@ describe('App tab switching and trending cache', () => {
         // Refresh forces a fresh fetch past the cache.
         await user.click(screen.getByRole('button', {name: 'Refresh'}));
         await waitFor(() => expect(FetchTrending).toHaveBeenCalledTimes(2));
+    });
+});
+
+describe('App reactions tab', () => {
+    it('polls on load and renders reactions when the tab is opened', async () => {
+        const user = userEvent.setup();
+        vi.mocked(GetSettings).mockResolvedValue(makeSettings({users: ['octocat']}));
+        vi.mocked(PollReactions).mockResolvedValue(
+            makeReactionsResult({items: [makeReactionItem({target: 'octocat/my-repo'})]}),
+        );
+
+        render(<App />);
+        await screen.findByRole('button', {name: /Reactions/});
+        await waitFor(() => expect(PollReactions).toHaveBeenCalled());
+
+        await user.click(screen.getByRole('button', {name: /Reactions/}));
+        expect(await screen.findByRole('link', {name: 'octocat/my-repo'})).toBeInTheDocument();
+    });
+
+    it('shows the unread count on the tab and clears it when opened', async () => {
+        const user = userEvent.setup();
+        vi.mocked(GetSettings).mockResolvedValue(makeSettings({users: ['octocat']}));
+        vi.mocked(PollReactions).mockResolvedValue(makeReactionsResult({unreadCount: 3}));
+
+        render(<App />);
+        const tab = await screen.findByRole('button', {name: /Reactions/});
+        await waitFor(() => expect(within(tab).getByText('3')).toBeInTheDocument());
+
+        await user.click(tab);
+        expect(MarkReactionsRead).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(within(tab).queryByText('3')).not.toBeInTheDocument());
+    });
+
+    it('stays read when polling while the Reactions tab is open', async () => {
+        const user = userEvent.setup();
+        vi.mocked(GetSettings).mockResolvedValue(makeSettings({users: ['octocat']}));
+        // Every poll reports unread reactions; the tab being open must keep them seen.
+        vi.mocked(PollReactions).mockResolvedValue(
+            makeReactionsResult({items: [makeReactionItem()], unreadCount: 3}),
+        );
+
+        render(<App />);
+        const tab = await screen.findByRole('button', {name: /Reactions/});
+
+        // Open the tab (marks read), then Refresh while it is the active view.
+        await user.click(tab);
+        await user.click(screen.getByRole('button', {name: 'Refresh'}));
+        await waitFor(() => expect(PollReactions).toHaveBeenCalledTimes(2));
+
+        // Leaving the tab must not surface a badge for reactions seen while open.
+        await user.click(screen.getByRole('button', {name: 'Feed'}));
+        expect(within(tab).queryByText('3')).not.toBeInTheDocument();
+    });
+
+    it('does not poll reactions when there is no token', async () => {
+        vi.mocked(GetSettings).mockResolvedValue(makeSettings({hasToken: false}));
+        render(<App />);
+
+        await screen.findByRole('button', {name: 'Sign in with GitHub'});
+        expect(PollReactions).not.toHaveBeenCalled();
     });
 });
 

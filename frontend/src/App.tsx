@@ -1,14 +1,30 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import './App.css';
-import {AddUser, FetchFeed, FetchTrending, GetSettings, RemoveUser, SignOut, Version} from '../wailsjs/go/main/App';
-import {discover, feed, main} from '../wailsjs/go/models';
+import {
+    AddUser,
+    FetchFeed,
+    FetchTrending,
+    GetSettings,
+    MarkReactionsRead,
+    PollReactions,
+    RemoveUser,
+    SignOut,
+    Version,
+} from '../wailsjs/go/main/App';
+import {discover, feed, main, notifications} from '../wailsjs/go/models';
 import {savePrefs, loadPrefs, type DiscoverPrefs} from './discover';
 import {DiscoverView} from './components/DiscoverView';
 import {FeedView} from './components/FeedView';
+import {ReactionsView} from './components/ReactionsView';
 import {ThemeMenu} from './components/ThemeMenu';
 import {TokenSetup} from './components/TokenSetup';
 import {useFeedReadPosition} from './hooks/useFeedReadPosition';
 import {useTheme} from './hooks/useTheme';
+
+// How often to poll for new reactions while the app is open. Stars and forks
+// do not need second-level freshness, and the backend's conditional requests
+// keep each poll cheap.
+const REACTIONS_POLL_INTERVAL_MS = 3 * 60 * 1000;
 
 export default function App() {
     const [settings, setSettings] = useState<main.Settings | null>(null);
@@ -20,9 +36,21 @@ export default function App() {
     const accountRef = useRef<HTMLDivElement>(null);
     const [uiError, setUiError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [view, setView] = useState<'feed' | 'discover'>('feed');
+    const [view, setView] = useState<'feed' | 'discover' | 'reactions'>('feed');
     const [version, setVersion] = useState('');
     const theme = useTheme();
+
+    // Reactions (stars and forks on the user's own repos). Polled in the
+    // background so the unread badge updates regardless of the active tab.
+    const [reactionItems, setReactionItems] = useState<notifications.Item[]>([]);
+    const [reactionErrors, setReactionErrors] = useState<string[]>([]);
+    const [reactionUnauthorized, setReactionUnauthorized] = useState(false);
+    const [reactionUnread, setReactionUnread] = useState(0);
+    const [reactionLoading, setReactionLoading] = useState(false);
+    // Tracks the active view for callbacks that must read it without being
+    // recreated on every switch (the background poll closes over it).
+    const viewRef = useRef(view);
+    viewRef.current = view;
 
     // Owns the feed's scroll/read position and the "new since last read" badge.
     const {feedRef, newCount, handleScroll, jumpToTop} = useFeedReadPosition(items, view);
@@ -70,6 +98,31 @@ export default function App() {
             setUiError(String(err));
         } finally {
             setLoading(false);
+        }
+    }, []);
+
+    // Poll for new reactions (stars/forks) on the user's repos, updating the
+    // list and unread badge. Failures surface in the Reactions view, not as a
+    // global error, so a transient hiccup does not disrupt the other tabs.
+    const pollReactions = useCallback(async () => {
+        setReactionLoading(true);
+        try {
+            const res = await PollReactions();
+            setReactionItems(res.items ?? []);
+            setReactionErrors(res.errors ?? []);
+            setReactionUnauthorized(res.unauthorized ?? false);
+            // If the user is already viewing the tab, anything this poll found
+            // counts as seen: keep it read so leaving the tab shows no badge.
+            if (viewRef.current === 'reactions') {
+                setReactionUnread(0);
+                MarkReactionsRead();
+            } else {
+                setReactionUnread(res.unreadCount ?? 0);
+            }
+        } catch (err) {
+            setUiError(String(err));
+        } finally {
+            setReactionLoading(false);
         }
     }, []);
 
@@ -126,6 +179,30 @@ export default function App() {
         Version().then(setVersion);
     }, []);
 
+    // While signed in, poll reactions on load and every few minutes so the
+    // unread badge stays current without the user visiting the tab.
+    useEffect(() => {
+        if (!settings?.hasToken) {
+            return;
+        }
+        pollReactions();
+        const id = setInterval(pollReactions, REACTIONS_POLL_INTERVAL_MS);
+        return () => clearInterval(id);
+    }, [settings?.hasToken, pollReactions]);
+
+    // Opening the Reactions tab marks everything seen, matching the inbox
+    // model: the badge clears and the read watermark advances on the backend.
+    const selectView = useCallback(
+        (next: 'feed' | 'discover' | 'reactions') => {
+            setView(next);
+            if (next === 'reactions' && settings?.hasToken) {
+                setReactionUnread(0);
+                MarkReactionsRead();
+            }
+        },
+        [settings?.hasToken],
+    );
+
     if (settings === null) {
         return null;
     }
@@ -133,6 +210,7 @@ export default function App() {
     const finishTokenEdit = () => {
         setEditingToken(false);
         setUnauthorized(false);
+        setReactionUnauthorized(false);
         // The cached trending results were fetched with the old token; drop
         // them so the new token takes effect on the next Discover load.
         discoverCache.current.clear();
@@ -143,6 +221,9 @@ export default function App() {
             setSettings(s);
             if (s.hasToken && s.users.length > 0) {
                 refresh();
+            }
+            if (s.hasToken) {
+                pollReactions();
             }
         });
     };
@@ -164,6 +245,10 @@ export default function App() {
             setUnauthorized(false);
             setItems([]);
             setFetchErrors([]);
+            setReactionItems([]);
+            setReactionErrors([]);
+            setReactionUnread(0);
+            setReactionUnauthorized(false);
         } catch (err) {
             setUiError(String(err));
         }
@@ -210,8 +295,16 @@ export default function App() {
     };
 
     // The header Refresh and its spinner track whichever tab is active.
-    const onRefresh = () => (view === 'feed' ? refresh() : loadTrending(discoverPrefs, true));
-    const headerLoading = view === 'feed' ? loading : discoverLoading;
+    const onRefresh = () => {
+        if (view === 'feed') {
+            return refresh();
+        }
+        if (view === 'discover') {
+            return loadTrending(discoverPrefs, true);
+        }
+        return pollReactions();
+    };
+    const headerLoading = view === 'feed' ? loading : view === 'discover' ? discoverLoading : reactionLoading;
 
     return (
         <div className="app">
@@ -221,15 +314,24 @@ export default function App() {
                     <nav className="tabs">
                         <button
                             className={view === 'feed' ? 'tab active' : 'tab'}
-                            onClick={() => setView('feed')}
+                            onClick={() => selectView('feed')}
                         >
                             Feed
                         </button>
                         <button
                             className={view === 'discover' ? 'tab active' : 'tab'}
-                            onClick={() => setView('discover')}
+                            onClick={() => selectView('discover')}
                         >
                             Discover
+                        </button>
+                        <button
+                            className={view === 'reactions' ? 'tab active' : 'tab'}
+                            onClick={() => selectView('reactions')}
+                        >
+                            Reactions
+                            {view !== 'reactions' && reactionUnread > 0 && (
+                                <span className="tab-badge">{reactionUnread}</span>
+                            )}
                         </button>
                     </nav>
                 </div>
@@ -266,7 +368,15 @@ export default function App() {
                     </button>
                 </div>
             </header>
-            {view === 'discover' ? (
+            {view === 'reactions' ? (
+                <ReactionsView
+                    items={reactionItems}
+                    loading={reactionLoading}
+                    errors={reactionErrors}
+                    unauthorized={reactionUnauthorized}
+                    onReauthenticate={() => setEditingToken(true)}
+                />
+            ) : view === 'discover' ? (
                 <DiscoverView
                     prefs={discoverPrefs}
                     onChangePrefs={changeDiscoverPrefs}
