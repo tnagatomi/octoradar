@@ -5,6 +5,13 @@ import '@testing-library/jest-dom/vitest';
 import {afterEach} from 'vitest';
 import {cleanup} from '@testing-library/react';
 
+// jsdom does not implement Element.scrollTo; components that reset their scroll
+// position (e.g. DiscoverView on a new result) call it. Stub it as a no-op so
+// those effects run without throwing.
+if (typeof Element.prototype.scrollTo !== 'function') {
+    Element.prototype.scrollTo = () => {};
+}
+
 // This jsdom build ships without Web Storage, so the theme/discover/read-position
 // persistence (which reads window.localStorage) has nowhere to write. Provide a
 // small in-memory Storage so those code paths run as they do in the browser.
