@@ -1,3 +1,4 @@
+import {useEffect, useRef} from 'react';
 import {discover} from '../../wailsjs/go/models';
 import {LANGUAGES, PERIODS, type DiscoverPrefs} from '../discover';
 import {RepoCard} from './RepoCard';
@@ -19,6 +20,10 @@ export function DiscoverView({
 }) {
     const repositories = result?.repositories ?? [];
     const errors = result?.errors ?? [];
+    const feedRef = useRef<HTMLElement>(null);
+    useEffect(() => {
+        feedRef.current?.scrollTo(0, 0);
+    }, [prefs.period, prefs.language]);
     return (
         <div className="layout">
             <aside className="sidebar">
@@ -51,7 +56,7 @@ export function DiscoverView({
                 </select>
                 <p className="hint">Newly created repositories, most-starred first.</p>
             </aside>
-            <main className="feed">
+            <main className="feed" ref={feedRef}>
                 {unauthorized && (
                     <div className="error banner auth-banner">
                         <span>Your GitHub session has expired. Re-authenticate to keep discovering.</span>
