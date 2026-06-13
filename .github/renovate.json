@@ -7,6 +7,8 @@
   ],
   "semanticCommits": "enabled",
   "semanticCommitScope": null,
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
   "packageRules": [
     {
       "description": "Keep the Go toolchain version in go.mod up to date",
