@@ -176,6 +176,27 @@ describe('App reactions tab', () => {
         await waitFor(() => expect(within(tab).queryByText('3')).not.toBeInTheDocument());
     });
 
+    it('stays read when polling while the Reactions tab is open', async () => {
+        const user = userEvent.setup();
+        vi.mocked(GetSettings).mockResolvedValue(makeSettings({users: ['octocat']}));
+        // Every poll reports unread reactions; the tab being open must keep them seen.
+        vi.mocked(PollReactions).mockResolvedValue(
+            makeReactionsResult({items: [makeReactionItem()], unreadCount: 3}),
+        );
+
+        render(<App />);
+        const tab = await screen.findByRole('button', {name: /Reactions/});
+
+        // Open the tab (marks read), then Refresh while it is the active view.
+        await user.click(tab);
+        await user.click(screen.getByRole('button', {name: 'Refresh'}));
+        await waitFor(() => expect(PollReactions).toHaveBeenCalledTimes(2));
+
+        // Leaving the tab must not surface a badge for reactions seen while open.
+        await user.click(screen.getByRole('button', {name: 'Feed'}));
+        expect(within(tab).queryByText('3')).not.toBeInTheDocument();
+    });
+
     it('does not poll reactions when there is no token', async () => {
         vi.mocked(GetSettings).mockResolvedValue(makeSettings({hasToken: false}));
         render(<App />);

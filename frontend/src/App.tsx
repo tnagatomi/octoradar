@@ -47,6 +47,10 @@ export default function App() {
     const [reactionUnauthorized, setReactionUnauthorized] = useState(false);
     const [reactionUnread, setReactionUnread] = useState(0);
     const [reactionLoading, setReactionLoading] = useState(false);
+    // Tracks the active view for callbacks that must read it without being
+    // recreated on every switch (the background poll closes over it).
+    const viewRef = useRef(view);
+    viewRef.current = view;
 
     // Owns the feed's scroll/read position and the "new since last read" badge.
     const {feedRef, newCount, handleScroll, jumpToTop} = useFeedReadPosition(items, view);
@@ -107,7 +111,14 @@ export default function App() {
             setReactionItems(res.items ?? []);
             setReactionErrors(res.errors ?? []);
             setReactionUnauthorized(res.unauthorized ?? false);
-            setReactionUnread(res.unreadCount ?? 0);
+            // If the user is already viewing the tab, anything this poll found
+            // counts as seen: keep it read so leaving the tab shows no badge.
+            if (viewRef.current === 'reactions') {
+                setReactionUnread(0);
+                MarkReactionsRead();
+            } else {
+                setReactionUnread(res.unreadCount ?? 0);
+            }
         } catch (err) {
             setUiError(String(err));
         } finally {
