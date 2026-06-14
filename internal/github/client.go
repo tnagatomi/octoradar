@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -48,6 +50,10 @@ type Client struct {
 	// baseURL is the API root. It defaults to the public API and is only
 	// overridden in tests to point at a local server.
 	baseURL string
+	// pollIntervalSec is the largest X-Poll-Interval (seconds) GitHub has
+	// returned on this client's responses, asking the caller to poll no more
+	// often. It is atomic because one client fans out concurrent requests.
+	pollIntervalSec atomic.Int64
 }
 
 // NewClient returns a client that authenticates with the given token.
@@ -225,10 +231,41 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.recordPollInterval(resp)
 	if resp.StatusCode != http.StatusOK {
 		return newAPIError(resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// PollIntervalSeconds returns the largest X-Poll-Interval GitHub has asked this
+// client to honour, or 0 if none was sent. Callers polling the activity APIs
+// should not poll more often than this.
+func (c *Client) PollIntervalSeconds() int {
+	return int(c.pollIntervalSec.Load())
+}
+
+// recordPollInterval folds a response's X-Poll-Interval header into the
+// client's running maximum. GitHub returns it on the activity endpoints to ask
+// for slower polling under load; absent or malformed headers are ignored.
+func (c *Client) recordPollInterval(resp *http.Response) {
+	v := resp.Header.Get("X-Poll-Interval")
+	if v == "" {
+		return
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return
+	}
+	for {
+		cur := c.pollIntervalSec.Load()
+		if int64(n) <= cur {
+			return
+		}
+		if c.pollIntervalSec.CompareAndSwap(cur, int64(n)) {
+			return
+		}
+	}
 }
 
 // getConditional is like get but issues a conditional request with the given
@@ -249,6 +286,7 @@ func (c *Client) getConditional(ctx context.Context, path, etag string, out any)
 		return "", false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.recordPollInterval(resp)
 	if resp.StatusCode == http.StatusNotModified {
 		return etag, true, nil
 	}

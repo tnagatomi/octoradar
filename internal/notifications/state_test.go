@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -18,8 +19,7 @@ func TestStateSaveLoadRoundTrip(t *testing.T) {
 
 	read := time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC)
 	state := &State{
-		Initialized:   true,
-		RepoCounts:    map[string]RepoCount{"me/a": {Stars: 12, Forks: 3}},
+		RepoEventIDs:  map[string][]string{"me/a": {"s2", "s1"}},
 		RepoETags:     map[string]string{"me/a": `"etag1"`},
 		ReadWatermark: read,
 		Items: []Item{
@@ -34,11 +34,8 @@ func TestStateSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !loaded.Initialized {
-		t.Error("Initialized = false, want true")
-	}
-	if loaded.RepoCounts["me/a"] != (RepoCount{Stars: 12, Forks: 3}) {
-		t.Errorf("RepoCounts[me/a] = %+v", loaded.RepoCounts["me/a"])
+	if !reflect.DeepEqual(loaded.RepoEventIDs["me/a"], []string{"s2", "s1"}) {
+		t.Errorf("RepoEventIDs[me/a] = %+v, want [s2 s1]", loaded.RepoEventIDs["me/a"])
 	}
 	if loaded.RepoETags["me/a"] != `"etag1"` {
 		t.Errorf("RepoETags[me/a] = %q", loaded.RepoETags["me/a"])
@@ -58,8 +55,8 @@ func TestLoadMissingFileYieldsUninitialized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Initialized {
-		t.Error("Initialized = true, want false so the first poll sets a baseline")
+	if len(loaded.RepoEventIDs) != 0 {
+		t.Errorf("RepoEventIDs = %+v, want none so the first poll baselines each repo", loaded.RepoEventIDs)
 	}
 	if len(loaded.Items) != 0 {
 		t.Errorf("Items = %+v, want none", loaded.Items)

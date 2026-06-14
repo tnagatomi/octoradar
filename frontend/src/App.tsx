@@ -20,11 +20,7 @@ import {ThemeMenu} from './components/ThemeMenu';
 import {TokenSetup} from './components/TokenSetup';
 import {useFeedReadPosition} from './hooks/useFeedReadPosition';
 import {useTheme} from './hooks/useTheme';
-
-// How often to poll for new reactions while the app is open. Stars and forks
-// do not need second-level freshness, and the backend's conditional requests
-// keep each poll cheap.
-const REACTIONS_POLL_INTERVAL_MS = 3 * 60 * 1000;
+import {REACTIONS_POLL_INTERVAL_MS, nextPollDelayMs} from './reactionsPolling';
 
 export default function App() {
     const [settings, setSettings] = useState<main.Settings | null>(null);
@@ -62,6 +58,10 @@ export default function App() {
     const [discoverResult, setDiscoverResult] = useState<discover.Result | null>(null);
     const [discoverLoading, setDiscoverLoading] = useState(false);
     const discoverCache = useRef<Map<string, discover.Result>>(new Map());
+    // The delay before the next reactions poll, adjusted to honour GitHub's
+    // X-Poll-Interval. A ref so the polling loop reads the latest value without
+    // restarting its timer.
+    const pollDelayRef = useRef(REACTIONS_POLL_INTERVAL_MS);
 
     // Close the account menu when clicking outside it or pressing Escape.
     useEffect(() => {
@@ -108,6 +108,7 @@ export default function App() {
         setReactionLoading(true);
         try {
             const res = await PollReactions();
+            pollDelayRef.current = nextPollDelayMs(res.minPollIntervalSec);
             setReactionItems(res.items ?? []);
             setReactionErrors(res.errors ?? []);
             setReactionUnauthorized(res.unauthorized ?? false);
@@ -179,15 +180,27 @@ export default function App() {
         Version().then(setVersion);
     }, []);
 
-    // While signed in, poll reactions on load and every few minutes so the
-    // unread badge stays current without the user visiting the tab.
+    // While signed in, poll reactions on load and then on a self-scheduling
+    // timer so the unread badge stays current without the user visiting the
+    // tab. A chained timeout (rather than a fixed interval) lets each poll pick
+    // up the backed-off delay GitHub may have asked for.
     useEffect(() => {
         if (!settings?.hasToken) {
             return;
         }
-        pollReactions();
-        const id = setInterval(pollReactions, REACTIONS_POLL_INTERVAL_MS);
-        return () => clearInterval(id);
+        let timer: ReturnType<typeof setTimeout>;
+        let cancelled = false;
+        const tick = async () => {
+            await pollReactions();
+            if (!cancelled) {
+                timer = setTimeout(tick, pollDelayRef.current);
+            }
+        };
+        tick();
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
     }, [settings?.hasToken, pollReactions]);
 
     // Opening the Reactions tab marks everything seen, matching the inbox
