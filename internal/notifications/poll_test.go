@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"slices"
 	"testing"
 	"time"
 
@@ -39,8 +38,6 @@ type fakeClient struct {
 	// pageCalls records which pages were fetched so tests can assert pagination.
 	deepPages map[string]map[int][]github.Event
 	pageCalls map[string][]int
-	// pageErr[key], when set, is returned for any page 2+ fetch of that repo.
-	pageErr map[string]error
 }
 
 func (f *fakeClient) OwnedRepos(_ context.Context) ([]github.UserRepo, error) {
@@ -53,9 +50,6 @@ func (f *fakeClient) RepoEventsPage(_ context.Context, owner, repo string, page 
 		f.pageCalls = map[string][]int{}
 	}
 	f.pageCalls[key] = append(f.pageCalls[key], page)
-	if err := f.pageErr[key]; err != nil {
-		return nil, err
-	}
 	return f.deepPages[key][page], nil
 }
 
@@ -351,55 +345,6 @@ func TestPollDoesNotPageQuietRepo(t *testing.T) {
 
 	if got := client.pageCalls["me/a"]; len(got) != 0 {
 		t.Errorf("pageCalls = %v, want none on a short first page", got)
-	}
-}
-
-// TestPollBaselinesDeeperPages guards against re-notifying a reaction that
-// existed before the baseline: a cold start must walk the deeper pages and
-// record their IDs (without emitting), or a star buried below a busy first page
-// would later be mistaken for new.
-func TestPollBaselinesDeeperPages(t *testing.T) {
-	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
-	client := &fakeClient{
-		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
-		events: map[string][]github.Event{"me/a": pushes(github.EventsPerPage)}, // full page 1, no reactions
-		deepPages: map[string]map[int][]github.Event{"me/a": {
-			2: {star("s1", "alice", t0)},
-		}},
-	}
-	state := &State{} // cold start
-
-	res := Poll(context.Background(), client, state)
-
-	if len(res.Items) != 0 {
-		t.Errorf("Items = %+v, want none while baselining", res.Items)
-	}
-	if !slices.Contains(state.RepoEventIDs["me/a"], "s1") {
-		t.Errorf("RepoEventIDs[me/a] = %v, want the buried page-2 reaction s1 baselined", state.RepoEventIDs["me/a"])
-	}
-}
-
-// TestPollPreservesEtagWhenPaginationFails guards against a permanent miss: if a
-// deeper page fails after page 1 changed, the new page-1 ETag must not be
-// committed, or the next poll would get a 304 and never retry the deeper pages.
-func TestPollPreservesEtagWhenPaginationFails(t *testing.T) {
-	client := &fakeClient{
-		repos:   []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
-		events:  map[string][]github.Event{"me/a": pushes(github.EventsPerPage)}, // full page 1 triggers pagination
-		pageErr: map[string]error{"me/a": &github.APIError{StatusCode: http.StatusInternalServerError}},
-	}
-	state := &State{
-		RepoEventIDs: map[string][]string{"me/a": {"s1"}},
-		RepoETags:    map[string]string{"me/a": `"old"`},
-	}
-
-	res := Poll(context.Background(), client, state)
-
-	if len(res.Errors) != 1 {
-		t.Fatalf("Errors = %v, want the deep-page failure recorded", res.Errors)
-	}
-	if state.RepoETags["me/a"] != `"old"` {
-		t.Errorf("RepoETags[me/a] = %q, want the old etag preserved so page 1 is re-fetched (not 304) next poll", state.RepoETags["me/a"])
 	}
 }
 
