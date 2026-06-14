@@ -117,6 +117,45 @@ func TestRepoEventsNotModified(t *testing.T) {
 	}
 }
 
+func TestPollIntervalSecondsTracksMax(t *testing.T) {
+	interval := "60"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Poll-Interval", interval)
+		w.Header().Set("ETag", `"e"`)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("tok")
+	c.baseURL = srv.URL
+	if c.PollIntervalSeconds() != 0 {
+		t.Errorf("PollIntervalSeconds = %d before any request, want 0", c.PollIntervalSeconds())
+	}
+
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 60 {
+		t.Errorf("PollIntervalSeconds = %d, want 60 from the header", got)
+	}
+
+	interval = "120"
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 120 {
+		t.Errorf("PollIntervalSeconds = %d, want 120 (the larger interval)", got)
+	}
+
+	interval = "90"
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 120 {
+		t.Errorf("PollIntervalSeconds = %d, want 120 retained (max, not last)", got)
+	}
+}
+
 func TestRepoEventsUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

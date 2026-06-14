@@ -244,6 +244,7 @@ export namespace notifications {
 	    errors: string[];
 	    unauthorized: boolean;
 	    unreadCount: number;
+	    minPollIntervalSec: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Result(source);
@@ -255,6 +256,7 @@ export namespace notifications {
 	        this.errors = source["errors"];
 	        this.unauthorized = source["unauthorized"];
 	        this.unreadCount = source["unreadCount"];
+	        this.minPollIntervalSec = source["minPollIntervalSec"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -23,11 +23,14 @@ const maxReactionPages = 3
 
 // Result is the reaction list returned to the UI, with the unread tally and
 // per-poll failures. Unauthorized signals the token must be re-entered.
+// MinPollIntervalSec, when non-zero, is the slowest poll cadence GitHub has
+// asked for via X-Poll-Interval, so the UI can back off under load.
 type Result struct {
-	Items        []Item   `json:"items"`
-	Errors       []string `json:"errors"`
-	Unauthorized bool     `json:"unauthorized"`
-	UnreadCount  int      `json:"unreadCount"`
+	Items              []Item   `json:"items"`
+	Errors             []string `json:"errors"`
+	Unauthorized       bool     `json:"unauthorized"`
+	UnreadCount        int      `json:"unreadCount"`
+	MinPollIntervalSec int      `json:"minPollIntervalSec"`
 }
 
 // Poll scans the user's repositories for new stars and forks, mutating state
