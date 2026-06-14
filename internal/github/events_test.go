@@ -51,6 +51,43 @@ func TestRepoEvents(t *testing.T) {
 	}
 }
 
+func TestRepoEventsPage(t *testing.T) {
+	var gotPath, gotPerPage, gotPage, gotIfNoneMatch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotPerPage = r.URL.Query().Get("per_page")
+		gotPage = r.URL.Query().Get("page")
+		gotIfNoneMatch = r.Header.Get("If-None-Match")
+		_, _ = w.Write([]byte(`[
+			{"id":"9","type":"ForkEvent","actor":{"login":"bob"},"repo":{"name":"foo/bar"},"created_at":"2026-06-14T10:00:00Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("tok")
+	c.baseURL = srv.URL
+	events, err := c.RepoEventsPage(context.Background(), "foo", "bar", 2)
+	if err != nil {
+		t.Fatalf("RepoEventsPage returned error: %v", err)
+	}
+
+	if gotPath != "/repos/foo/bar/events" {
+		t.Errorf("path = %q, want /repos/foo/bar/events", gotPath)
+	}
+	if gotPerPage != "100" {
+		t.Errorf("per_page = %q, want 100", gotPerPage)
+	}
+	if gotPage != "2" {
+		t.Errorf("page = %q, want 2", gotPage)
+	}
+	if gotIfNoneMatch != "" {
+		t.Errorf("If-None-Match = %q, want none on a deep page", gotIfNoneMatch)
+	}
+	if len(events) != 1 || events[0].Type != "ForkEvent" {
+		t.Fatalf("events = %+v, want one ForkEvent", events)
+	}
+}
+
 func TestRepoEventsNotModified(t *testing.T) {
 	var gotIfNoneMatch string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
