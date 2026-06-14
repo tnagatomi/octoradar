@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +12,16 @@ import (
 
 func star(id, login string, at time.Time) github.Event {
 	return github.Event{ID: id, Type: "WatchEvent", Actor: github.Actor{Login: login}, Repo: github.Repo{Name: "me/a"}, CreatedAt: at}
+}
+
+// pushes returns n non-reaction PushEvents, used to fill a page so tests can
+// exercise the pagination that digs past a busy first page.
+func pushes(n int) []github.Event {
+	out := make([]github.Event, n)
+	for i := range out {
+		out[i] = github.Event{ID: fmt.Sprintf("p%d", i), Type: "PushEvent", Repo: github.Repo{Name: "me/a"}}
+	}
+	return out
 }
 
 // fakeClient is a stand-in for the github client. It records the ETag sent with
@@ -23,10 +34,23 @@ type fakeClient struct {
 	eventsErr   map[string]error
 	notModified map[string]bool
 	etagsSent   map[string]string
+	// deepPages[key][page] is the events served for page 2+ of a repo, and
+	// pageCalls records which pages were fetched so tests can assert pagination.
+	deepPages map[string]map[int][]github.Event
+	pageCalls map[string][]int
 }
 
 func (f *fakeClient) OwnedRepos(_ context.Context) ([]github.UserRepo, error) {
 	return f.repos, f.reposErr
+}
+
+func (f *fakeClient) RepoEventsPage(_ context.Context, owner, repo string, page int) ([]github.Event, error) {
+	key := owner + "/" + repo
+	if f.pageCalls == nil {
+		f.pageCalls = map[string][]int{}
+	}
+	f.pageCalls[key] = append(f.pageCalls[key], page)
+	return f.deepPages[key][page], nil
 }
 
 func (f *fakeClient) RepoEvents(_ context.Context, owner, repo, etag string) ([]github.Event, string, bool, error) {
@@ -238,6 +262,89 @@ func TestPollPrunesIneligibleRepos(t *testing.T) {
 	}
 	if _, ok := state.RepoEventIDs["me/a"]; !ok {
 		t.Error("RepoEventIDs dropped me/a, want the eligible repo retained")
+	}
+}
+
+// TestPollPaginatesPastBusyFirstPage covers a reaction buried below a full
+// first page of pushes: the poll must page deeper to find it.
+func TestPollPaginatesPastBusyFirstPage(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": pushes(github.EventsPerPage)}, // full page, no reaction
+		deepPages: map[string]map[int][]github.Event{"me/a": {
+			2: {star("s2", "bob", t0.Add(2*time.Hour)), star("s1", "alice", t0.Add(time.Hour))},
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	res := Poll(context.Background(), client, state)
+
+	if got := client.pageCalls["me/a"]; len(got) != 1 || got[0] != 2 {
+		t.Fatalf("pageCalls = %v, want [2] (paged once past the busy first page)", got)
+	}
+	if len(res.Items) != 1 || res.Items[0].ID != "s2" {
+		t.Fatalf("Items = %+v, want only the buried new star s2", res.Items)
+	}
+}
+
+// TestPollStopsPagingAtKnownBoundary asserts no deep page is fetched once the
+// first page already reaches a reaction the set has seen.
+func TestPollStopsPagingAtKnownBoundary(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos: []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {
+			star("s2", "bob", t0.Add(2*time.Hour)),
+			star("s1", "alice", t0.Add(time.Hour)),
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	if got := client.pageCalls["me/a"]; len(got) != 0 {
+		t.Errorf("pageCalls = %v, want none (boundary reached on page 1)", got)
+	}
+}
+
+// TestPollCapsPaginationAtMaxPages asserts a timeline that never reaches a known
+// reaction stops at the events API's three-page window instead of paging on.
+func TestPollCapsPaginationAtMaxPages(t *testing.T) {
+	full := pushes(github.EventsPerPage)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": full},
+		deepPages: map[string]map[int][]github.Event{"me/a": {
+			2: full,
+			3: full,
+			4: full,
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	want := []int{2, 3}
+	if got := client.pageCalls["me/a"]; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("pageCalls = %v, want %v (capped at three pages total)", got, want)
+	}
+}
+
+// TestPollDoesNotPageQuietRepo asserts a first page shorter than a full page
+// (the whole timeline fits) is taken as complete, sparing a deep request.
+func TestPollDoesNotPageQuietRepo(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {star("s2", "bob", t0.Add(2*time.Hour))}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	if got := client.pageCalls["me/a"]; len(got) != 0 {
+		t.Errorf("pageCalls = %v, want none on a short first page", got)
 	}
 }
 

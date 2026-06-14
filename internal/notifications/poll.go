@@ -13,7 +13,13 @@ import (
 type fetcher interface {
 	OwnedRepos(ctx context.Context) ([]github.UserRepo, error)
 	RepoEvents(ctx context.Context, owner, repo, etag string) ([]github.Event, string, bool, error)
+	RepoEventsPage(ctx context.Context, owner, repo string, page int) ([]github.Event, error)
 }
+
+// maxReactionPages bounds how deep a single repository is paged when digging
+// for reactions buried below busy first pages. It matches the events API's
+// 300-event (three-page) window, past which older events are unavailable.
+const maxReactionPages = 3
 
 // Result is the reaction list returned to the UI, with the unread tally and
 // per-poll failures. Unauthorized signals the token must be re-entered.
@@ -75,6 +81,14 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 			continue
 		}
 		if baselined {
+			events, err = paginateReactions(ctx, client, r, seen, events)
+			if err != nil {
+				if github.IsUnauthorized(err) {
+					unauthorized = true
+					break
+				}
+				errs = append(errs, err.Error())
+			}
 			newItems = append(newItems, newReactions(seen, events)...)
 		}
 		state.RepoEventIDs[name] = updateSeen(seen, events)
@@ -87,6 +101,28 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 		res.Errors = errs
 	}
 	return res
+}
+
+// paginateReactions extends page1 with deeper event pages while the timeline
+// stays full and no already-seen reaction has been reached, bounded by
+// maxReactionPages. This digs out a star or fork buried below a first page
+// crowded with pushes; a short page or a known reaction marks the boundary and
+// stops the walk. On a fetch error it returns the events gathered so far.
+func paginateReactions(ctx context.Context, client fetcher, r github.UserRepo, seen []string, page1 []github.Event) ([]github.Event, error) {
+	events := page1
+	last := page1
+	for page := 2; page <= maxReactionPages; page++ {
+		if len(last) < github.EventsPerPage || reachedSeen(seen, last) {
+			break
+		}
+		more, err := client.RepoEventsPage(ctx, r.Owner.Login, r.Name, page)
+		if err != nil {
+			return events, err
+		}
+		events = append(events, more...)
+		last = more
+	}
+	return events, nil
 }
 
 // pruneIneligible drops per-repo event-ID sets and ETags for repositories no

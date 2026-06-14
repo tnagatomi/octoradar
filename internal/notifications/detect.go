@@ -26,6 +26,22 @@ func newReactions(seen []string, events []github.Event) []Item {
 	return fresh
 }
 
+// reachedSeen reports whether any reaction in events is already in seen, which
+// marks the boundary between new reactions and ones a prior poll recorded.
+// Pagination stops once this boundary is reached.
+func reachedSeen(seen []string, events []github.Event) bool {
+	known := make(map[string]bool, len(seen))
+	for _, id := range seen {
+		known[id] = true
+	}
+	for _, it := range parseReactions(events) {
+		if known[it.ID] {
+			return true
+		}
+	}
+	return false
+}
+
 // updateSeen folds the reaction event IDs in events into seen, keeping the set
 // newest-first and capped at maxSeenIDs. New IDs from events go in front, since
 // the events API returns them newest-first and they are newer than anything
