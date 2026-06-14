@@ -25,8 +25,11 @@ type Result struct {
 }
 
 // Poll scans the user's repositories for new stars and forks, mutating state
-// with the fresh baseline, ETags, and reaction list. The first poll only
-// records a baseline so pre-existing reactions are not replayed.
+// with the fresh per-repo event-ID sets, ETags, and reaction list. New stars
+// and forks are detected by event ID, not by star/fork count, so an
+// unstar-then-star that leaves the count unchanged still surfaces. A repository
+// seen for the first time only records a baseline, so its pre-existing
+// reactions are not replayed.
 func Poll(ctx context.Context, client fetcher, state *State) Result {
 	repos, err := client.OwnedRepos(ctx)
 	if err != nil {
@@ -34,27 +37,30 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 	}
 
 	eligible := eligibleRepos(repos)
-	curr := countRepos(eligible)
-
-	if !state.Initialized {
-		state.RepoCounts = curr
-		state.Initialized = true
-		return result(state)
+	if state.RepoEventIDs == nil {
+		state.RepoEventIDs = map[string][]string{}
 	}
-
-	prev := state.RepoCounts
-	state.RepoCounts = curr
 	if state.RepoETags == nil {
 		state.RepoETags = map[string]string{}
 	}
-	byName := reposByName(eligible)
 
 	var newItems []Item
 	var errs []string
 	unauthorized := false
-	for _, name := range changedRepos(prev, curr) {
-		r := byName[name]
-		events, etag, notModified, err := client.RepoEvents(ctx, r.Owner.Login, r.Name, state.RepoETags[name])
+	for _, r := range sortedByName(eligible) {
+		name := r.FullName
+		seen, baselined := state.RepoEventIDs[name]
+
+		// A repository without an event-ID baseline must establish one before a
+		// conditional request can help: sending a stale ETag risks a 304 that
+		// would skip baselining and let the first genuinely new reaction be
+		// swallowed. So baseline requests go out without an ETag.
+		etag := ""
+		if baselined {
+			etag = state.RepoETags[name]
+		}
+
+		events, newEtag, notModified, err := client.RepoEvents(ctx, r.Owner.Login, r.Name, etag)
 		if err != nil {
 			if github.IsUnauthorized(err) {
 				unauthorized = true
@@ -63,13 +69,14 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 			errs = append(errs, err.Error())
 			continue
 		}
-		state.RepoETags[name] = etag
+		state.RepoETags[name] = newEtag
 		if notModified {
 			continue
 		}
-		dStars := curr[name].Stars - prev[name].Stars
-		dForks := curr[name].Forks - prev[name].Forks
-		newItems = append(newItems, takeDelta(parseReactions(events), dStars, dForks)...)
+		if baselined {
+			newItems = append(newItems, newReactions(seen, events)...)
+		}
+		state.RepoEventIDs[name] = updateSeen(seen, events)
 	}
 
 	state.Items = mergeItems(state.Items, newItems)
@@ -81,35 +88,12 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 	return res
 }
 
-// reposByName indexes repositories by full name for owner/name lookup.
-func reposByName(repos []github.UserRepo) map[string]github.UserRepo {
-	m := make(map[string]github.UserRepo, len(repos))
-	for _, r := range repos {
-		m[r.FullName] = r
-	}
-	return m
-}
-
-// takeDelta keeps only the newest dStars star reactions and dForks fork
-// reactions from a newest-first list, so a repository's older, pre-baseline
-// reactions are not surfaced when its count rises.
-func takeDelta(reactions []Item, dStars, dForks int) []Item {
-	var taken []Item
-	for _, it := range reactions {
-		switch it.Action {
-		case "starred":
-			if dStars > 0 {
-				taken = append(taken, it)
-				dStars--
-			}
-		case "forked":
-			if dForks > 0 {
-				taken = append(taken, it)
-				dForks--
-			}
-		}
-	}
-	return taken
+// sortedByName returns the repositories ordered by full name, so polling and
+// any resulting errors are deterministic regardless of the API's ordering.
+func sortedByName(repos []github.UserRepo) []github.UserRepo {
+	out := append([]github.UserRepo(nil), repos...)
+	sort.Slice(out, func(i, j int) bool { return out[i].FullName < out[j].FullName })
+	return out
 }
 
 // mergeItems combines newly found reactions with the existing list, dropping
@@ -128,15 +112,6 @@ func mergeItems(existing, found []Item) []Item {
 		return merged[i].CreatedAt.After(merged[j].CreatedAt)
 	})
 	return capItems(merged)
-}
-
-// countRepos tallies the star and fork counts of the given repositories.
-func countRepos(repos []github.UserRepo) map[string]RepoCount {
-	counts := make(map[string]RepoCount, len(repos))
-	for _, r := range repos {
-		counts[r.FullName] = RepoCount{Stars: r.StargazersCount, Forks: r.ForksCount}
-	}
-	return counts
 }
 
 // result builds the Result view from the current state.

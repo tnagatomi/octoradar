@@ -24,17 +24,19 @@ func capItems(items []Item) []Item {
 	return items
 }
 
-// State is the persisted reaction tracking state. RepoCounts is the baseline
-// the next poll diffs against; RepoETags keeps per-repo conditional-request
-// tags so unchanged repos cost no rate limit; Items is the capped, newest-first
-// list shown in the UI; ReadWatermark is the timestamp up to which the user has
-// seen reactions, so anything newer counts as unread.
+// State is the persisted reaction tracking state. RepoEventIDs holds, per
+// repository, the recently seen reaction event IDs the next poll diffs against;
+// a repository's presence in the map marks it as baselined, so cold start, new
+// repositories, and failed fetches are all handled by membership. RepoETags
+// keeps per-repo conditional-request tags so unchanged repos cost no rate
+// limit; Items is the capped, newest-first list shown in the UI; ReadWatermark
+// is the timestamp up to which the user has seen reactions, so anything newer
+// counts as unread.
 type State struct {
-	Initialized   bool                 `json:"initialized"`
-	RepoCounts    map[string]RepoCount `json:"repoCounts"`
-	RepoETags     map[string]string    `json:"repoETags"`
-	Items         []Item               `json:"items"`
-	ReadWatermark time.Time            `json:"readWatermark"`
+	RepoEventIDs  map[string][]string `json:"repoEventIDs"`
+	RepoETags     map[string]string   `json:"repoETags"`
+	Items         []Item              `json:"items"`
+	ReadWatermark time.Time           `json:"readWatermark"`
 }
 
 // Path returns the location of the reaction state file.
