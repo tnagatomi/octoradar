@@ -43,6 +43,7 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 	if state.RepoETags == nil {
 		state.RepoETags = map[string]string{}
 	}
+	pruneIneligible(state, eligible)
 
 	var newItems []Item
 	var errs []string
@@ -86,6 +87,26 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 		res.Errors = errs
 	}
 	return res
+}
+
+// pruneIneligible drops per-repo event-ID sets and ETags for repositories no
+// longer in the eligible set — deleted, renamed, archived, or turned into a
+// fork — so the persisted maps do not grow without bound.
+func pruneIneligible(state *State, eligible []github.UserRepo) {
+	keep := make(map[string]bool, len(eligible))
+	for _, r := range eligible {
+		keep[r.FullName] = true
+	}
+	for name := range state.RepoEventIDs {
+		if !keep[name] {
+			delete(state.RepoEventIDs, name)
+		}
+	}
+	for name := range state.RepoETags {
+		if !keep[name] {
+			delete(state.RepoETags, name)
+		}
+	}
 }
 
 // sortedByName returns the repositories ordered by full name, so polling and

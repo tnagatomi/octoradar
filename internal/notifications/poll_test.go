@@ -215,6 +215,32 @@ func TestPollUnauthorizedPreservesItems(t *testing.T) {
 	}
 }
 
+// TestPollPrunesIneligibleRepos asserts that state for repos no longer in the
+// eligible set (deleted, renamed, archived, or turned into a fork) is dropped,
+// so the persisted maps do not grow unbounded.
+func TestPollPrunesIneligibleRepos(t *testing.T) {
+	client := &fakeClient{
+		repos:       []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		notModified: map[string]bool{"me/a": true},
+	}
+	state := &State{
+		RepoEventIDs: map[string][]string{"me/a": {"s1"}, "me/gone": {"g1"}},
+		RepoETags:    map[string]string{"me/a": `"etag"`, "me/gone": `"goneetag"`},
+	}
+
+	Poll(context.Background(), client, state)
+
+	if _, ok := state.RepoEventIDs["me/gone"]; ok {
+		t.Error("RepoEventIDs still has me/gone, want it pruned")
+	}
+	if _, ok := state.RepoETags["me/gone"]; ok {
+		t.Error("RepoETags still has me/gone, want it pruned")
+	}
+	if _, ok := state.RepoEventIDs["me/a"]; !ok {
+		t.Error("RepoEventIDs dropped me/a, want the eligible repo retained")
+	}
+}
+
 // TestPollFailedRepoRetriesBaseline asserts a repo whose fetch errors stays
 // unbaselined (absent from RepoEventIDs) so the next poll retries its baseline
 // rather than treating it as established.
