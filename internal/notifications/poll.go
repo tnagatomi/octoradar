@@ -79,19 +79,28 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 			errs = append(errs, err.Error())
 			continue
 		}
-		state.RepoETags[name] = newEtag
 		if notModified {
 			continue
 		}
-		if baselined {
-			events, err = paginateReactions(ctx, client, r, seen, events)
-			if err != nil {
-				if github.IsUnauthorized(err) {
-					unauthorized = true
-					break
-				}
-				errs = append(errs, err.Error())
+
+		// Walk deeper pages whether or not this repo is baselined: a new repo
+		// must record every reaction in reach so pre-existing ones below page 1
+		// are not later mistaken for new.
+		events, err = paginateReactions(ctx, client, r, seen, events)
+		if err != nil {
+			if github.IsUnauthorized(err) {
+				unauthorized = true
+				break
 			}
+			errs = append(errs, err.Error())
+			// Leave the ETag and seen set untouched so the next poll re-fetches
+			// page 1 (a 200, not a 304) and retries the deeper pages, rather
+			// than committing the new ETag and never looking again.
+			continue
+		}
+
+		state.RepoETags[name] = newEtag
+		if baselined {
 			newItems = append(newItems, newReactions(seen, events)...)
 		}
 		state.RepoEventIDs[name] = updateSeen(seen, events)
