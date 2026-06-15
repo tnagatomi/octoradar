@@ -280,7 +280,13 @@ func (a *App) PollReactions() notifications.Result {
 
 	a.notifMu.Lock()
 	defer a.notifMu.Unlock()
-	res := notifications.Poll(a.ctx, github.NewClient(token), a.notif)
+	client := github.NewClient(token)
+	res := notifications.Poll(a.ctx, client, a.notif)
+	// Surface GitHub's requested poll cadence so the frontend can slow down
+	// when the activity API asks it to under load.
+	if iv := client.PollIntervalSeconds(); iv > 0 {
+		res.MinPollIntervalSec = iv
+	}
 	if err := a.notif.Save(); err != nil {
 		res.Errors = append(res.Errors, fmt.Sprintf("saving reactions: %v", err))
 	}

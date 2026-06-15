@@ -13,20 +13,32 @@ import (
 type fetcher interface {
 	OwnedRepos(ctx context.Context) ([]github.UserRepo, error)
 	RepoEvents(ctx context.Context, owner, repo, etag string) ([]github.Event, string, bool, error)
+	RepoEventsPage(ctx context.Context, owner, repo string, page int) ([]github.Event, error)
 }
+
+// maxReactionPages bounds how deep a single repository is paged when digging
+// for reactions buried below busy first pages. It matches the events API's
+// 300-event (three-page) window, past which older events are unavailable.
+const maxReactionPages = 3
 
 // Result is the reaction list returned to the UI, with the unread tally and
 // per-poll failures. Unauthorized signals the token must be re-entered.
+// MinPollIntervalSec, when non-zero, is the slowest poll cadence GitHub has
+// asked for via X-Poll-Interval, so the UI can back off under load.
 type Result struct {
-	Items        []Item   `json:"items"`
-	Errors       []string `json:"errors"`
-	Unauthorized bool     `json:"unauthorized"`
-	UnreadCount  int      `json:"unreadCount"`
+	Items              []Item   `json:"items"`
+	Errors             []string `json:"errors"`
+	Unauthorized       bool     `json:"unauthorized"`
+	UnreadCount        int      `json:"unreadCount"`
+	MinPollIntervalSec int      `json:"minPollIntervalSec"`
 }
 
 // Poll scans the user's repositories for new stars and forks, mutating state
-// with the fresh baseline, ETags, and reaction list. The first poll only
-// records a baseline so pre-existing reactions are not replayed.
+// with the fresh per-repo event-ID sets, ETags, and reaction list. New stars
+// and forks are detected by event ID, not by star/fork count, so an
+// unstar-then-star that leaves the count unchanged still surfaces. A repository
+// seen for the first time only records a baseline, so its pre-existing
+// reactions are not replayed.
 func Poll(ctx context.Context, client fetcher, state *State) Result {
 	repos, err := client.OwnedRepos(ctx)
 	if err != nil {
@@ -34,27 +46,31 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 	}
 
 	eligible := eligibleRepos(repos)
-	curr := countRepos(eligible)
-
-	if !state.Initialized {
-		state.RepoCounts = curr
-		state.Initialized = true
-		return result(state)
+	if state.RepoEventIDs == nil {
+		state.RepoEventIDs = map[string][]string{}
 	}
-
-	prev := state.RepoCounts
-	state.RepoCounts = curr
 	if state.RepoETags == nil {
 		state.RepoETags = map[string]string{}
 	}
-	byName := reposByName(eligible)
+	pruneIneligible(state, eligible)
 
 	var newItems []Item
 	var errs []string
 	unauthorized := false
-	for _, name := range changedRepos(prev, curr) {
-		r := byName[name]
-		events, etag, notModified, err := client.RepoEvents(ctx, r.Owner.Login, r.Name, state.RepoETags[name])
+	for _, r := range sortedByName(eligible) {
+		name := r.FullName
+		seen, baselined := state.RepoEventIDs[name]
+
+		// A repository without an event-ID baseline must establish one before a
+		// conditional request can help: sending a stale ETag risks a 304 that
+		// would skip baselining and let the first genuinely new reaction be
+		// swallowed. So baseline requests go out without an ETag.
+		etag := ""
+		if baselined {
+			etag = state.RepoETags[name]
+		}
+
+		events, newEtag, notModified, err := client.RepoEvents(ctx, r.Owner.Login, r.Name, etag)
 		if err != nil {
 			if github.IsUnauthorized(err) {
 				unauthorized = true
@@ -63,13 +79,31 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 			errs = append(errs, err.Error())
 			continue
 		}
-		state.RepoETags[name] = etag
 		if notModified {
 			continue
 		}
-		dStars := curr[name].Stars - prev[name].Stars
-		dForks := curr[name].Forks - prev[name].Forks
-		newItems = append(newItems, takeDelta(parseReactions(events), dStars, dForks)...)
+
+		// Walk deeper pages whether or not this repo is baselined: a new repo
+		// must record every reaction in reach so pre-existing ones below page 1
+		// are not later mistaken for new.
+		events, err = paginateReactions(ctx, client, r, seen, events)
+		if err != nil {
+			if github.IsUnauthorized(err) {
+				unauthorized = true
+				break
+			}
+			errs = append(errs, err.Error())
+			// Leave the ETag and seen set untouched so the next poll re-fetches
+			// page 1 (a 200, not a 304) and retries the deeper pages, rather
+			// than committing the new ETag and never looking again.
+			continue
+		}
+
+		state.RepoETags[name] = newEtag
+		if baselined {
+			newItems = append(newItems, newReactions(seen, events)...)
+		}
+		state.RepoEventIDs[name] = updateSeen(seen, events)
 	}
 
 	state.Items = mergeItems(state.Items, newItems)
@@ -81,35 +115,54 @@ func Poll(ctx context.Context, client fetcher, state *State) Result {
 	return res
 }
 
-// reposByName indexes repositories by full name for owner/name lookup.
-func reposByName(repos []github.UserRepo) map[string]github.UserRepo {
-	m := make(map[string]github.UserRepo, len(repos))
-	for _, r := range repos {
-		m[r.FullName] = r
+// paginateReactions extends page1 with deeper event pages while the timeline
+// stays full and no already-seen reaction has been reached, bounded by
+// maxReactionPages. This digs out a star or fork buried below a first page
+// crowded with pushes; a short page or a known reaction marks the boundary and
+// stops the walk. On a fetch error it returns the events gathered so far.
+func paginateReactions(ctx context.Context, client fetcher, r github.UserRepo, seen []string, page1 []github.Event) ([]github.Event, error) {
+	events := page1
+	last := page1
+	for page := 2; page <= maxReactionPages; page++ {
+		if len(last) < github.EventsPerPage || reachedSeen(seen, last) {
+			break
+		}
+		more, err := client.RepoEventsPage(ctx, r.Owner.Login, r.Name, page)
+		if err != nil {
+			return events, err
+		}
+		events = append(events, more...)
+		last = more
 	}
-	return m
+	return events, nil
 }
 
-// takeDelta keeps only the newest dStars star reactions and dForks fork
-// reactions from a newest-first list, so a repository's older, pre-baseline
-// reactions are not surfaced when its count rises.
-func takeDelta(reactions []Item, dStars, dForks int) []Item {
-	var taken []Item
-	for _, it := range reactions {
-		switch it.Action {
-		case "starred":
-			if dStars > 0 {
-				taken = append(taken, it)
-				dStars--
-			}
-		case "forked":
-			if dForks > 0 {
-				taken = append(taken, it)
-				dForks--
-			}
+// pruneIneligible drops per-repo event-ID sets and ETags for repositories no
+// longer in the eligible set — deleted, renamed, archived, or turned into a
+// fork — so the persisted maps do not grow without bound.
+func pruneIneligible(state *State, eligible []github.UserRepo) {
+	keep := make(map[string]bool, len(eligible))
+	for _, r := range eligible {
+		keep[r.FullName] = true
+	}
+	for name := range state.RepoEventIDs {
+		if !keep[name] {
+			delete(state.RepoEventIDs, name)
 		}
 	}
-	return taken
+	for name := range state.RepoETags {
+		if !keep[name] {
+			delete(state.RepoETags, name)
+		}
+	}
+}
+
+// sortedByName returns the repositories ordered by full name, so polling and
+// any resulting errors are deterministic regardless of the API's ordering.
+func sortedByName(repos []github.UserRepo) []github.UserRepo {
+	out := append([]github.UserRepo(nil), repos...)
+	sort.Slice(out, func(i, j int) bool { return out[i].FullName < out[j].FullName })
+	return out
 }
 
 // mergeItems combines newly found reactions with the existing list, dropping
@@ -128,15 +181,6 @@ func mergeItems(existing, found []Item) []Item {
 		return merged[i].CreatedAt.After(merged[j].CreatedAt)
 	})
 	return capItems(merged)
-}
-
-// countRepos tallies the star and fork counts of the given repositories.
-func countRepos(repos []github.UserRepo) map[string]RepoCount {
-	counts := make(map[string]RepoCount, len(repos))
-	for _, r := range repos {
-		counts[r.FullName] = RepoCount{Stars: r.StargazersCount, Forks: r.ForksCount}
-	}
-	return counts
 }
 
 // result builds the Result view from the current state.

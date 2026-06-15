@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -13,44 +14,75 @@ func star(id, login string, at time.Time) github.Event {
 	return github.Event{ID: id, Type: "WatchEvent", Actor: github.Actor{Login: login}, Repo: github.Repo{Name: "me/a"}, CreatedAt: at}
 }
 
-// fakeClient is a stand-in for the github client, recording which repos had
-// their events fetched so tests can assert the cheap-scan gating.
+// pushes returns n non-reaction PushEvents, used to fill a page so tests can
+// exercise the pagination that digs past a busy first page.
+func pushes(n int) []github.Event {
+	out := make([]github.Event, n)
+	for i := range out {
+		out[i] = github.Event{ID: fmt.Sprintf("p%d", i), Type: "PushEvent", Repo: github.Repo{Name: "me/a"}}
+	}
+	return out
+}
+
+// fakeClient is a stand-in for the github client. It records the ETag sent with
+// each repo's request so tests can assert the baseline-without-ETag migration
+// path, and can be told to reply 304 or error per repo.
 type fakeClient struct {
-	repos           []github.UserRepo
-	reposErr        error
-	events          map[string][]github.Event
-	eventsErr       map[string]error
-	repoEventsCalls []string
+	repos       []github.UserRepo
+	reposErr    error
+	events      map[string][]github.Event
+	eventsErr   map[string]error
+	notModified map[string]bool
+	etagsSent   map[string]string
+	// deepPages[key][page] is the events served for page 2+ of a repo, and
+	// pageCalls records which pages were fetched so tests can assert pagination.
+	deepPages map[string]map[int][]github.Event
+	pageCalls map[string][]int
 }
 
 func (f *fakeClient) OwnedRepos(_ context.Context) ([]github.UserRepo, error) {
 	return f.repos, f.reposErr
 }
 
-func (f *fakeClient) RepoEvents(_ context.Context, owner, repo, _ string) ([]github.Event, string, bool, error) {
+func (f *fakeClient) RepoEventsPage(_ context.Context, owner, repo string, page int) ([]github.Event, error) {
 	key := owner + "/" + repo
-	f.repoEventsCalls = append(f.repoEventsCalls, key)
-	if f.eventsErr != nil {
-		if err := f.eventsErr[key]; err != nil {
-			return nil, "", false, err
-		}
+	if f.pageCalls == nil {
+		f.pageCalls = map[string][]int{}
+	}
+	f.pageCalls[key] = append(f.pageCalls[key], page)
+	return f.deepPages[key][page], nil
+}
+
+func (f *fakeClient) RepoEvents(_ context.Context, owner, repo, etag string) ([]github.Event, string, bool, error) {
+	key := owner + "/" + repo
+	if f.etagsSent == nil {
+		f.etagsSent = map[string]string{}
+	}
+	f.etagsSent[key] = etag
+	if err := f.eventsErr[key]; err != nil {
+		return nil, "", false, err
+	}
+	if f.notModified[key] {
+		return nil, etag, true, nil
 	}
 	return f.events[key], `"etag-` + key + `"`, false, nil
 }
 
-func TestPollColdStartEstablishesBaseline(t *testing.T) {
-	client := &fakeClient{repos: []github.UserRepo{
-		{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}, StargazersCount: 10, ForksCount: 2},
-	}}
+func TestPollColdStartBaselinesWithoutEmitting(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {star("s2", "bob", t0.Add(2*time.Hour)), star("s1", "alice", t0.Add(time.Hour))}},
+	}
 	state := &State{}
 
 	res := Poll(context.Background(), client, state)
 
-	if !state.Initialized {
-		t.Error("Initialized = false, want true after the first poll")
+	if client.etagsSent["me/a"] != "" {
+		t.Errorf("baseline request sent ETag %q, want none", client.etagsSent["me/a"])
 	}
-	if len(client.repoEventsCalls) != 0 {
-		t.Errorf("fetched events %v, want none on the baseline poll", client.repoEventsCalls)
+	if len(state.RepoEventIDs["me/a"]) != 2 {
+		t.Errorf("baseline RepoEventIDs[me/a] = %v, want the two event ids recorded", state.RepoEventIDs["me/a"])
 	}
 	if len(res.Items) != 0 {
 		t.Errorf("Items = %+v, want none on the baseline poll", res.Items)
@@ -58,61 +90,119 @@ func TestPollColdStartEstablishesBaseline(t *testing.T) {
 	if res.UnreadCount != 0 {
 		t.Errorf("UnreadCount = %d, want 0", res.UnreadCount)
 	}
-	if state.RepoCounts["me/a"] != (RepoCount{Stars: 10, Forks: 2}) {
-		t.Errorf("baseline count = %+v, want {10 2}", state.RepoCounts["me/a"])
-	}
 }
 
-func TestPollTakesOnlyDeltaNewestReactions(t *testing.T) {
-	t0 := time.Date(2026, 6, 13, 8, 0, 0, 0, time.UTC)
+// TestPollDetectsNewReactionByEventID is the core of the redesign: alice
+// unstars and bob stars between polls, so the star count is unchanged, yet bob's
+// new WatchEvent must still surface because its event ID is unknown.
+func TestPollDetectsNewReactionByEventID(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
 	client := &fakeClient{
-		repos: []github.UserRepo{
-			{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}, StargazersCount: 12},
-		},
-		events: map[string][]github.Event{
-			// Newest first, as the events API returns them.
-			"me/a": {
-				star("s3", "carol", t0.Add(3*time.Hour)),
-				star("s2", "bob", t0.Add(2*time.Hour)),
-				star("s1", "alice", t0.Add(1*time.Hour)), // pre-baseline, must not surface
-			},
-		},
+		repos: []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {
+			star("s2", "bob", t0.Add(2*time.Hour)),
+			star("s1", "alice", t0.Add(time.Hour)),
+		}},
 	}
-	// Baseline already had 10 stars; the count rose by 2.
 	state := &State{
-		Initialized: true,
-		RepoCounts:  map[string]RepoCount{"me/a": {Stars: 10}},
-		RepoETags:   map[string]string{},
+		RepoEventIDs: map[string][]string{"me/a": {"s1"}},
+		RepoETags:    map[string]string{"me/a": `"old"`},
 	}
 
 	res := Poll(context.Background(), client, state)
 
-	if len(client.repoEventsCalls) != 1 || client.repoEventsCalls[0] != "me/a" {
-		t.Errorf("repoEventsCalls = %v, want [me/a]", client.repoEventsCalls)
+	if client.etagsSent["me/a"] != `"old"` {
+		t.Errorf("baselined repo sent ETag %q, want the stored \"old\"", client.etagsSent["me/a"])
 	}
+	if len(res.Items) != 1 || res.Items[0].ID != "s2" {
+		t.Fatalf("Items = %+v, want only the new star s2", res.Items)
+	}
+	if len(state.RepoEventIDs["me/a"]) != 2 {
+		t.Errorf("RepoEventIDs[me/a] = %v, want s2 folded into the set", state.RepoEventIDs["me/a"])
+	}
+}
+
+// TestPollMigratesEtagOnlyStateByBaselining covers upgrading from the old
+// count-delta state, which has ETags but no event-ID baseline. The repo must be
+// fetched without its stale ETag so a baseline is recorded instead of a 304
+// swallowing the first real reaction.
+func TestPollMigratesEtagOnlyStateByBaselining(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {star("s1", "alice", t0.Add(time.Hour))}},
+	}
+	state := &State{RepoETags: map[string]string{"me/a": `"stale"`}}
+
+	res := Poll(context.Background(), client, state)
+
+	if client.etagsSent["me/a"] != "" {
+		t.Errorf("migration request sent ETag %q, want none so a baseline is recorded", client.etagsSent["me/a"])
+	}
+	if len(res.Items) != 0 {
+		t.Errorf("Items = %+v, want none while baselining the migrated repo", res.Items)
+	}
+	if len(state.RepoEventIDs["me/a"]) != 1 {
+		t.Errorf("RepoEventIDs[me/a] = %v, want the baseline recorded", state.RepoEventIDs["me/a"])
+	}
+}
+
+func TestPollSkipsNotModified(t *testing.T) {
+	client := &fakeClient{
+		repos:       []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		notModified: map[string]bool{"me/a": true},
+	}
+	state := &State{
+		RepoEventIDs: map[string][]string{"me/a": {"s1"}},
+		RepoETags:    map[string]string{"me/a": `"etag"`},
+	}
+
+	res := Poll(context.Background(), client, state)
+
+	if len(res.Items) != 0 {
+		t.Errorf("Items = %+v, want none on a 304", res.Items)
+	}
+	if len(res.Errors) != 0 {
+		t.Errorf("Errors = %v, want none on a 304", res.Errors)
+	}
+}
+
+func TestPollAccumulatesWithoutDuplicates(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {star("s2", "bob", t0.Add(2*time.Hour))}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	// First poll: the new star s2 surfaces.
+	Poll(context.Background(), client, state)
+
+	// Second poll: the events page still lists s2 alongside the new s3.
+	// s2 must not be duplicated in the list.
+	client.events["me/a"] = []github.Event{
+		star("s3", "carol", t0.Add(3*time.Hour)),
+		star("s2", "bob", t0.Add(2*time.Hour)),
+	}
+	res := Poll(context.Background(), client, state)
+
 	if len(res.Items) != 2 {
-		t.Fatalf("len(Items) = %d, want 2 (the delta), got %+v", len(res.Items), res.Items)
+		t.Fatalf("len(Items) = %d, want 2 (s3, s2 deduped), got %+v", len(res.Items), res.Items)
 	}
-	// Newest first: carol then bob; alice is the historical star and excluded.
 	if res.Items[0].ID != "s3" || res.Items[1].ID != "s2" {
 		t.Errorf("items = [%s %s], want [s3 s2]", res.Items[0].ID, res.Items[1].ID)
-	}
-	if state.RepoCounts["me/a"].Stars != 12 {
-		t.Errorf("updated star count = %d, want 12", state.RepoCounts["me/a"].Stars)
-	}
-	if state.RepoETags["me/a"] == "" {
-		t.Error("RepoETags[me/a] not stored after fetching events")
 	}
 }
 
 func TestPollUnreadCountAndMarkRead(t *testing.T) {
-	t0 := time.Date(2026, 6, 13, 8, 0, 0, 0, time.UTC)
-	client := &fakeClient{repos: []github.UserRepo{
-		{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}, StargazersCount: 10},
-	}}
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:       []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		notModified: map[string]bool{"me/a": true},
+	}
 	state := &State{
-		Initialized: true,
-		RepoCounts:  map[string]RepoCount{"me/a": {Stars: 10}},
+		RepoEventIDs: map[string][]string{"me/a": {"i2", "i1"}},
+		RepoETags:    map[string]string{"me/a": `"etag"`},
 		Items: []Item{
 			{ID: "i2", CreatedAt: t0.Add(2 * time.Hour)},
 			{ID: "i1", CreatedAt: t0.Add(1 * time.Hour)},
@@ -135,9 +225,8 @@ func TestPollUnreadCountAndMarkRead(t *testing.T) {
 func TestPollUnauthorizedPreservesItems(t *testing.T) {
 	client := &fakeClient{reposErr: &github.APIError{StatusCode: http.StatusUnauthorized}}
 	state := &State{
-		Initialized: true,
-		RepoCounts:  map[string]RepoCount{"me/a": {Stars: 10}},
-		Items:       []Item{{ID: "i1"}},
+		RepoEventIDs: map[string][]string{"me/a": {"s1"}},
+		Items:        []Item{{ID: "i1"}},
 	}
 
 	res := Poll(context.Background(), client, state)
@@ -150,31 +239,139 @@ func TestPollUnauthorizedPreservesItems(t *testing.T) {
 	}
 }
 
-func TestPollAccumulatesWithoutDuplicates(t *testing.T) {
-	t0 := time.Date(2026, 6, 13, 8, 0, 0, 0, time.UTC)
+// TestPollPrunesIneligibleRepos asserts that state for repos no longer in the
+// eligible set (deleted, renamed, archived, or turned into a fork) is dropped,
+// so the persisted maps do not grow unbounded.
+func TestPollPrunesIneligibleRepos(t *testing.T) {
 	client := &fakeClient{
-		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}, StargazersCount: 11}},
-		events: map[string][]github.Event{"me/a": {star("s2", "bob", t0.Add(2*time.Hour)), star("s1", "alice", t0.Add(time.Hour))}},
+		repos:       []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		notModified: map[string]bool{"me/a": true},
 	}
-	state := &State{Initialized: true, RepoCounts: map[string]RepoCount{"me/a": {Stars: 10}}}
+	state := &State{
+		RepoEventIDs: map[string][]string{"me/a": {"s1"}, "me/gone": {"g1"}},
+		RepoETags:    map[string]string{"me/a": `"etag"`, "me/gone": `"goneetag"`},
+	}
 
-	// First poll: +1 star surfaces s2.
 	Poll(context.Background(), client, state)
 
-	// Second poll: another +1 star; the events page still lists s2 alongside
-	// the new s3. s2 must not be duplicated.
-	client.repos[0].StargazersCount = 12
-	client.events["me/a"] = []github.Event{
-		star("s3", "carol", t0.Add(3*time.Hour)),
-		star("s2", "bob", t0.Add(2*time.Hour)),
-		star("s1", "alice", t0.Add(time.Hour)),
+	if _, ok := state.RepoEventIDs["me/gone"]; ok {
+		t.Error("RepoEventIDs still has me/gone, want it pruned")
 	}
+	if _, ok := state.RepoETags["me/gone"]; ok {
+		t.Error("RepoETags still has me/gone, want it pruned")
+	}
+	if _, ok := state.RepoEventIDs["me/a"]; !ok {
+		t.Error("RepoEventIDs dropped me/a, want the eligible repo retained")
+	}
+}
+
+// TestPollPaginatesPastBusyFirstPage covers a reaction buried below a full
+// first page of pushes: the poll must page deeper to find it.
+func TestPollPaginatesPastBusyFirstPage(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": pushes(github.EventsPerPage)}, // full page, no reaction
+		deepPages: map[string]map[int][]github.Event{"me/a": {
+			2: {star("s2", "bob", t0.Add(2*time.Hour)), star("s1", "alice", t0.Add(time.Hour))},
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
 	res := Poll(context.Background(), client, state)
 
-	if len(res.Items) != 2 {
-		t.Fatalf("len(Items) = %d, want 2 (s3, s2 deduped), got %+v", len(res.Items), res.Items)
+	if got := client.pageCalls["me/a"]; len(got) != 1 || got[0] != 2 {
+		t.Fatalf("pageCalls = %v, want [2] (paged once past the busy first page)", got)
 	}
-	if res.Items[0].ID != "s3" || res.Items[1].ID != "s2" {
-		t.Errorf("items = [%s %s], want [s3 s2]", res.Items[0].ID, res.Items[1].ID)
+	if len(res.Items) != 1 || res.Items[0].ID != "s2" {
+		t.Fatalf("Items = %+v, want only the buried new star s2", res.Items)
+	}
+}
+
+// TestPollStopsPagingAtKnownBoundary asserts no deep page is fetched once the
+// first page already reaches a reaction the set has seen.
+func TestPollStopsPagingAtKnownBoundary(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos: []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {
+			star("s2", "bob", t0.Add(2*time.Hour)),
+			star("s1", "alice", t0.Add(time.Hour)),
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	if got := client.pageCalls["me/a"]; len(got) != 0 {
+		t.Errorf("pageCalls = %v, want none (boundary reached on page 1)", got)
+	}
+}
+
+// TestPollCapsPaginationAtMaxPages asserts a timeline that never reaches a known
+// reaction stops at the events API's three-page window instead of paging on.
+func TestPollCapsPaginationAtMaxPages(t *testing.T) {
+	full := pushes(github.EventsPerPage)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": full},
+		deepPages: map[string]map[int][]github.Event{"me/a": {
+			2: full,
+			3: full,
+			4: full,
+		}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	want := []int{2, 3}
+	if got := client.pageCalls["me/a"]; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("pageCalls = %v, want %v (capped at three pages total)", got, want)
+	}
+}
+
+// TestPollDoesNotPageQuietRepo asserts a first page shorter than a full page
+// (the whole timeline fits) is taken as complete, sparing a deep request.
+func TestPollDoesNotPageQuietRepo(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:  []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		events: map[string][]github.Event{"me/a": {star("s2", "bob", t0.Add(2*time.Hour))}},
+	}
+	state := &State{RepoEventIDs: map[string][]string{"me/a": {"s1"}}}
+
+	Poll(context.Background(), client, state)
+
+	if got := client.pageCalls["me/a"]; len(got) != 0 {
+		t.Errorf("pageCalls = %v, want none on a short first page", got)
+	}
+}
+
+// TestPollFailedRepoRetriesBaseline asserts a repo whose fetch errors stays
+// unbaselined (absent from RepoEventIDs) so the next poll retries its baseline
+// rather than treating it as established.
+func TestPollFailedRepoRetriesBaseline(t *testing.T) {
+	t0 := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	client := &fakeClient{
+		repos:     []github.UserRepo{{FullName: "me/a", Name: "a", Owner: github.Actor{Login: "me"}}},
+		eventsErr: map[string]error{"me/a": &github.APIError{StatusCode: http.StatusInternalServerError}},
+	}
+	state := &State{}
+
+	res := Poll(context.Background(), client, state)
+	if len(res.Errors) != 1 {
+		t.Fatalf("Errors = %v, want one fetch failure", res.Errors)
+	}
+	if _, baselined := state.RepoEventIDs["me/a"]; baselined {
+		t.Error("failed repo was baselined, want it left unbaselined for retry")
+	}
+
+	// Recover: the next poll succeeds and records the baseline.
+	client.eventsErr = nil
+	client.events = map[string][]github.Event{"me/a": {star("s1", "alice", t0)}}
+	Poll(context.Background(), client, state)
+	if _, baselined := state.RepoEventIDs["me/a"]; !baselined {
+		t.Error("repo not baselined after a successful retry")
 	}
 }

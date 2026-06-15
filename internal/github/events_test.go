@@ -51,6 +51,43 @@ func TestRepoEvents(t *testing.T) {
 	}
 }
 
+func TestRepoEventsPage(t *testing.T) {
+	var gotPath, gotPerPage, gotPage, gotIfNoneMatch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotPerPage = r.URL.Query().Get("per_page")
+		gotPage = r.URL.Query().Get("page")
+		gotIfNoneMatch = r.Header.Get("If-None-Match")
+		_, _ = w.Write([]byte(`[
+			{"id":"9","type":"ForkEvent","actor":{"login":"bob"},"repo":{"name":"foo/bar"},"created_at":"2026-06-14T10:00:00Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("tok")
+	c.baseURL = srv.URL
+	events, err := c.RepoEventsPage(context.Background(), "foo", "bar", 2)
+	if err != nil {
+		t.Fatalf("RepoEventsPage returned error: %v", err)
+	}
+
+	if gotPath != "/repos/foo/bar/events" {
+		t.Errorf("path = %q, want /repos/foo/bar/events", gotPath)
+	}
+	if gotPerPage != "100" {
+		t.Errorf("per_page = %q, want 100", gotPerPage)
+	}
+	if gotPage != "2" {
+		t.Errorf("page = %q, want 2", gotPage)
+	}
+	if gotIfNoneMatch != "" {
+		t.Errorf("If-None-Match = %q, want none on a deep page", gotIfNoneMatch)
+	}
+	if len(events) != 1 || events[0].Type != "ForkEvent" {
+		t.Fatalf("events = %+v, want one ForkEvent", events)
+	}
+}
+
 func TestRepoEventsNotModified(t *testing.T) {
 	var gotIfNoneMatch string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +114,45 @@ func TestRepoEventsNotModified(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Errorf("events = %+v, want none on a 304", events)
+	}
+}
+
+func TestPollIntervalSecondsTracksMax(t *testing.T) {
+	interval := "60"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Poll-Interval", interval)
+		w.Header().Set("ETag", `"e"`)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("tok")
+	c.baseURL = srv.URL
+	if c.PollIntervalSeconds() != 0 {
+		t.Errorf("PollIntervalSeconds = %d before any request, want 0", c.PollIntervalSeconds())
+	}
+
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 60 {
+		t.Errorf("PollIntervalSeconds = %d, want 60 from the header", got)
+	}
+
+	interval = "120"
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 120 {
+		t.Errorf("PollIntervalSeconds = %d, want 120 (the larger interval)", got)
+	}
+
+	interval = "90"
+	if _, _, _, err := c.RepoEvents(context.Background(), "o", "r", ""); err != nil {
+		t.Fatalf("RepoEvents: %v", err)
+	}
+	if got := c.PollIntervalSeconds(); got != 120 {
+		t.Errorf("PollIntervalSeconds = %d, want 120 retained (max, not last)", got)
 	}
 }
 
