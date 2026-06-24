@@ -15,6 +15,8 @@ export function CompleteDeviceLogin(arg1:string,arg2:number,arg3:number):Promise
 
 export function FetchFeed():Promise<feed.Result>;
 
+export function FetchGitHubFollowing():Promise<main.FollowingResult>;
+
 export function FetchTrending(arg1:string,arg2:string):Promise<discover.Result>;
 
 export function FetchUserFeed(arg1:string):Promise<feed.Result>;

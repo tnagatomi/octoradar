@@ -350,6 +350,48 @@ func (a *App) MarkReactionsRead() {
 	_ = a.notif.Save()
 }
 
+// FollowingAccount is one GitHub account the viewer follows, as shown in the
+// import picker.
+type FollowingAccount struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatarUrl"`
+}
+
+// FollowingResult is the import picker's view of the viewer's GitHub following.
+// Truncated reports that the safety valve stopped the fetch short; Errors and
+// Unauthorized mirror feed.Result so a partial or failed fetch degrades the
+// same way the feed does.
+type FollowingResult struct {
+	Accounts     []FollowingAccount `json:"accounts"`
+	Truncated    bool               `json:"truncated"`
+	Errors       []string           `json:"errors"`
+	Unauthorized bool               `json:"unauthorized"`
+}
+
+// FetchGitHubFollowing returns the accounts the authenticated user follows on
+// GitHub, for the import picker. A partial fetch still returns whatever was
+// gathered alongside an error; a 401 sets Unauthorized so the UI can prompt a
+// re-auth instead of showing a raw error.
+func (a *App) FetchGitHubFollowing() FollowingResult {
+	a.mu.Lock()
+	token := a.cfg.Token
+	a.mu.Unlock()
+
+	accounts, truncated, err := github.NewClient(token).Following(a.ctx)
+	res := FollowingResult{Truncated: truncated, Accounts: []FollowingAccount{}, Errors: []string{}}
+	for _, acc := range accounts {
+		res.Accounts = append(res.Accounts, FollowingAccount{Login: acc.Login, AvatarURL: acc.AvatarURL})
+	}
+	if err != nil {
+		if github.IsUnauthorized(err) {
+			res.Unauthorized = true
+		} else {
+			res.Errors = append(res.Errors, err.Error())
+		}
+	}
+	return res
+}
+
 // FetchTrending retrieves trending repositories for the given period and
 // language. period is "week", "month", or "quarter"; an empty language spans
 // all languages. Unlike the feed, no user list is needed: trending is global.

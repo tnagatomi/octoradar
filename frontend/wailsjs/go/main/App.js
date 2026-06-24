@@ -22,6 +22,10 @@ export function FetchFeed() {
   return window['go']['main']['App']['FetchFeed']();
 }
 
+export function FetchGitHubFollowing() {
+  return window['go']['main']['App']['FetchGitHubFollowing']();
+}
+
 export function FetchTrending(arg1, arg2) {
   return window['go']['main']['App']['FetchTrending'](arg1, arg2);
 }
