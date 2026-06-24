@@ -15,8 +15,10 @@ vi.mock('../../wailsjs/runtime/runtime', () => ({
 function setup(overrides: Partial<Parameters<typeof FeedView>[0]> = {}) {
     const props = {
         users: ['octocat'],
+        maxUsers: 50,
         onAddUser: vi.fn().mockResolvedValue(true),
         onRemoveUser: vi.fn(),
+        onImport: vi.fn(),
         uiError: '',
         items: [],
         loading: false,
@@ -48,6 +50,16 @@ describe('FeedView following list', () => {
     it('prompts to add usernames when nobody is followed', () => {
         setup({users: []});
         expect(screen.getByText('Add GitHub usernames to build your feed.')).toBeInTheDocument();
+    });
+
+    it('shows the follow count against the cap and opens the import picker', async () => {
+        const user = userEvent.setup();
+        const {onImport} = setup({users: ['octocat', 'torvalds'], maxUsers: 50});
+
+        expect(screen.getByText('2/50')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', {name: /import from github/i}));
+        expect(onImport).toHaveBeenCalled();
     });
 });
 
@@ -148,8 +160,10 @@ describe('FeedView banners and badge', () => {
 function renderFeed(overrides: Partial<Parameters<typeof FeedView>[0]>) {
     const base = {
         users: [],
+        maxUsers: 50,
         onAddUser: vi.fn().mockResolvedValue(true),
         onRemoveUser: vi.fn(),
+        onImport: vi.fn(),
         uiError: '',
         items: [],
         loading: false,

@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import './App.css';
 import {
     AddUser,
+    AddUsers,
     FetchFeed,
     FetchTrending,
     GetSettings,
@@ -15,6 +16,7 @@ import {discover, feed, main, notifications} from '../wailsjs/go/models';
 import {savePrefs, loadPrefs, type DiscoverPrefs} from './discover';
 import {DiscoverView} from './components/DiscoverView';
 import {FeedView} from './components/FeedView';
+import {ImportFollowingModal} from './components/ImportFollowingModal';
 import {ReactionsView} from './components/ReactionsView';
 import {ThemeMenu} from './components/ThemeMenu';
 import {TokenSetup} from './components/TokenSetup';
@@ -28,6 +30,7 @@ export default function App() {
     const [fetchErrors, setFetchErrors] = useState<string[]>([]);
     const [unauthorized, setUnauthorized] = useState(false);
     const [editingToken, setEditingToken] = useState(false);
+    const [importing, setImporting] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const accountRef = useRef<HTMLDivElement>(null);
     const [uiError, setUiError] = useState('');
@@ -296,6 +299,22 @@ export default function App() {
         }
     };
 
+    // Bulk add from the import picker. Returns whether it succeeded so the
+    // modal only closes once the follows are saved; on success the feed is
+    // refreshed to pull in the newly followed users' events.
+    const addUsers = async (logins: string[]): Promise<boolean> => {
+        setUiError('');
+        try {
+            const updated = await AddUsers(logins);
+            setSettings(updated);
+            refresh();
+            return true;
+        } catch (err) {
+            setUiError(String(err));
+            return false;
+        }
+    };
+
     const removeUser = async (username: string) => {
         setUiError('');
         try {
@@ -401,8 +420,10 @@ export default function App() {
             ) : (
                 <FeedView
                     users={settings.users}
+                    maxUsers={settings.maxUsers}
                     onAddUser={addUser}
                     onRemoveUser={removeUser}
+                    onImport={() => setImporting(true)}
                     uiError={uiError}
                     items={items}
                     loading={loading}
@@ -413,6 +434,18 @@ export default function App() {
                     newCount={newCount}
                     onScroll={handleScroll}
                     onJumpToTop={jumpToTop}
+                />
+            )}
+            {importing && (
+                <ImportFollowingModal
+                    users={settings.users}
+                    maxUsers={settings.maxUsers}
+                    onAddUsers={addUsers}
+                    onClose={() => setImporting(false)}
+                    onReauthenticate={() => {
+                        setImporting(false);
+                        setEditingToken(true);
+                    }}
                 />
             )}
         </div>

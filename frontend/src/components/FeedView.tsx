@@ -6,8 +6,10 @@ import {FeedItem} from './FeedItem';
 
 export function FeedView({
     users,
+    maxUsers,
     onAddUser,
     onRemoveUser,
+    onImport,
     uiError,
     items,
     loading,
@@ -20,9 +22,11 @@ export function FeedView({
     onJumpToTop,
 }: {
     users: string[];
+    maxUsers: number;
     // Returns whether the add succeeded, so the form can clear its input.
     onAddUser: (username: string) => Promise<boolean>;
     onRemoveUser: (username: string) => void;
+    onImport: () => void;
     uiError: string;
     items: feed.Item[];
     loading: boolean;
@@ -46,7 +50,12 @@ export function FeedView({
     return (
         <div className="layout">
             <aside className="sidebar">
-                <h2>Following</h2>
+                <div className="sidebar-heading">
+                    <h2>Following</h2>
+                    <span className="follow-count">
+                        {users.length}/{maxUsers}
+                    </span>
+                </div>
                 <form className="add-user" onSubmit={addUser}>
                     <Input
                         placeholder="Add a username"
@@ -57,6 +66,9 @@ export function FeedView({
                         Add
                     </button>
                 </form>
+                <button type="button" className="secondary import-button" onClick={onImport}>
+                    Import from GitHub
+                </button>
                 {uiError && <div className="error">{uiError}</div>}
                 <ul className="user-list">
                     {users.map((user) => (
