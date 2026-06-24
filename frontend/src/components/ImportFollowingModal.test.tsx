@@ -35,7 +35,7 @@ describe('ImportFollowingModal', () => {
             }),
         );
 
-        render(<ImportFollowingModal onClose={() => {}} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
 
         const items = await screen.findAllByRole('listitem');
         expect(items).toHaveLength(2);
@@ -48,7 +48,7 @@ describe('ImportFollowingModal', () => {
     it('shows a loading state while the fetch is in flight', () => {
         mockFollowing.mockReturnValue(new Promise(() => {}) as ReturnType<typeof FetchGitHubFollowing>);
 
-        render(<ImportFollowingModal onClose={() => {}} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
 
         expect(screen.getByText(/loading/i)).toBeInTheDocument();
         expect(screen.queryAllByRole('listitem')).toHaveLength(0);
@@ -57,9 +57,71 @@ describe('ImportFollowingModal', () => {
     it('shows an empty state when you do not follow anyone on GitHub', async () => {
         mockFollowing.mockResolvedValue(result({accounts: []}));
 
-        render(<ImportFollowingModal onClose={() => {}} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
 
         expect(await screen.findByText(/don't follow anyone/i)).toBeInTheDocument();
+    });
+
+    it('disables Add until something is selected, then labels it with the count', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'zoe', avatarUrl: 'https://avatars/zoe'},
+                ],
+            }),
+        );
+
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn().mockResolvedValue(true)} />);
+        await screen.findAllByRole('listitem');
+
+        const add = screen.getByRole('button', {name: /^add/i});
+        expect(add).toBeDisabled();
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'amy'}));
+        expect(screen.getByRole('button', {name: 'Add 1'})).toBeEnabled();
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'zoe'}));
+        expect(screen.getByRole('button', {name: 'Add 2'})).toBeInTheDocument();
+    });
+
+    it('passes the selected logins to onAddUsers and closes on success', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'zoe', avatarUrl: 'https://avatars/zoe'},
+                ],
+            }),
+        );
+        const onAddUsers = vi.fn().mockResolvedValue(true);
+        const onClose = vi.fn();
+
+        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} />);
+        await screen.findAllByRole('listitem');
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'zoe'}));
+        await userEvent.click(screen.getByRole('button', {name: 'Add 1'}));
+
+        expect(onAddUsers).toHaveBeenCalledWith(['zoe']);
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it('keeps the modal open when the add fails', async () => {
+        mockFollowing.mockResolvedValue(
+            result({accounts: [{login: 'amy', avatarUrl: 'https://avatars/amy'}]}),
+        );
+        const onAddUsers = vi.fn().mockResolvedValue(false);
+        const onClose = vi.fn();
+
+        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} />);
+        await screen.findAllByRole('listitem');
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'amy'}));
+        await userEvent.click(screen.getByRole('button', {name: 'Add 1'}));
+
+        expect(onAddUsers).toHaveBeenCalledWith(['amy']);
+        expect(onClose).not.toHaveBeenCalled();
     });
 
     it('filters the list by the search query, case-insensitively', async () => {
@@ -73,7 +135,7 @@ describe('ImportFollowingModal', () => {
             }),
         );
 
-        render(<ImportFollowingModal onClose={() => {}} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
         await screen.findAllByRole('listitem');
 
         await userEvent.type(screen.getByPlaceholderText(/search/i), 'an');

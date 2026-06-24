@@ -5,11 +5,19 @@ import {Input} from '../Input';
 
 // Modal that lists the accounts the viewer follows on GitHub so they can be
 // imported into the follow list. Mounting it opens it; it fetches the following
-// list once on mount.
-export function ImportFollowingModal({onClose}: {onClose: () => void}) {
+// list once on mount. onAddUsers persists the picked logins and returns whether
+// it succeeded, so the modal only closes once they are saved.
+export function ImportFollowingModal({
+    onClose,
+    onAddUsers,
+}: {
+    onClose: () => void;
+    onAddUsers: (logins: string[]) => Promise<boolean>;
+}) {
     const [accounts, setAccounts] = useState<main.FollowingAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [query, setQuery] = useState('');
+    const [selected, setSelected] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         let cancelled = false;
@@ -36,6 +44,24 @@ export function ImportFollowingModal({onClose}: {onClose: () => void}) {
         return accounts.filter((acc) => acc.login.toLowerCase().includes(q));
     }, [accounts, query]);
 
+    const toggle = (login: string) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(login)) {
+                next.delete(login);
+            } else {
+                next.add(login);
+            }
+            return next;
+        });
+    };
+
+    const add = async () => {
+        if (await onAddUsers([...selected])) {
+            onClose();
+        }
+    };
+
     return (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Import from GitHub">
             <div className="modal">
@@ -60,11 +86,23 @@ export function ImportFollowingModal({onClose}: {onClose: () => void}) {
                         <ul className="import-list">
                             {filtered.map((acc) => (
                                 <li key={acc.login}>
-                                    <img className="avatar" src={acc.avatarUrl} alt="" />
-                                    <span className="import-login">{acc.login}</span>
+                                    <label className="import-row">
+                                        <input
+                                            type="checkbox"
+                                            checked={selected.has(acc.login)}
+                                            onChange={() => toggle(acc.login)}
+                                        />
+                                        <img className="avatar" src={acc.avatarUrl} alt="" />
+                                        <span className="import-login">{acc.login}</span>
+                                    </label>
                                 </li>
                             ))}
                         </ul>
+                        <footer className="modal-footer">
+                            <button type="button" onClick={add} disabled={selected.size === 0}>
+                                Add {selected.size}
+                            </button>
+                        </footer>
                     </>
                 )}
             </div>
