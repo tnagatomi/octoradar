@@ -196,6 +196,59 @@ describe('ImportFollowingModal', () => {
         expect(screen.getByRole('checkbox', {name: 'amy'})).toBeEnabled();
     });
 
+    it('prompts to re-authenticate when the fetch is unauthorized', async () => {
+        mockFollowing.mockResolvedValue(result({accounts: [], unauthorized: true}));
+        const onReauthenticate = vi.fn();
+
+        render(
+            <ImportFollowingModal
+                onClose={() => {}}
+                onAddUsers={vi.fn()}
+                users={[]}
+                maxUsers={50}
+                onReauthenticate={onReauthenticate}
+            />,
+        );
+
+        await userEvent.click(await screen.findByRole('button', {name: /re-authenticate/i}));
+        expect(onReauthenticate).toHaveBeenCalled();
+        // The list never renders in this state.
+        expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    });
+
+    it('shows a partial-fetch error while still listing what loaded', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [{login: 'amy', avatarUrl: 'https://avatars/amy'}],
+                errors: ['following page 2: boom'],
+            }),
+        );
+
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
+
+        expect(await screen.findByText(/boom/)).toBeInTheDocument();
+        expect(screen.getByRole('checkbox', {name: 'amy'})).toBeInTheDocument();
+    });
+
+    it('notes when the list was truncated at the safety valve', async () => {
+        mockFollowing.mockResolvedValue(
+            result({accounts: [{login: 'amy', avatarUrl: 'https://avatars/amy'}], truncated: true}),
+        );
+
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
+
+        expect(await screen.findByText(/not all of them are shown/i)).toBeInTheDocument();
+    });
+
+    it('shows an error when the fetch itself rejects', async () => {
+        mockFollowing.mockRejectedValue(new Error('bridge down'));
+
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
+
+        expect(await screen.findByText(/bridge down/)).toBeInTheDocument();
+        expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+    });
+
     it('filters the list by the search query, case-insensitively', async () => {
         mockFollowing.mockResolvedValue(
             result({

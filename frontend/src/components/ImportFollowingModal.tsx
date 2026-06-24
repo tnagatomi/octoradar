@@ -12,29 +12,45 @@ export function ImportFollowingModal({
     onAddUsers,
     users,
     maxUsers,
+    onReauthenticate,
 }: {
     onClose: () => void;
     onAddUsers: (logins: string[]) => Promise<boolean>;
     users: string[];
     maxUsers: number;
+    onReauthenticate?: () => void;
 }) {
     const [accounts, setAccounts] = useState<main.FollowingAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [query, setQuery] = useState('');
     const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [errors, setErrors] = useState<string[]>([]);
+    const [truncated, setTruncated] = useState(false);
+    const [unauthorized, setUnauthorized] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
-        FetchGitHubFollowing().then((res) => {
-            if (cancelled) {
-                return;
-            }
-            const sorted = [...(res.accounts ?? [])].sort((a, b) =>
-                a.login.toLowerCase().localeCompare(b.login.toLowerCase()),
-            );
-            setAccounts(sorted);
-            setLoading(false);
-        });
+        FetchGitHubFollowing()
+            .then((res) => {
+                if (cancelled) {
+                    return;
+                }
+                const sorted = [...(res.accounts ?? [])].sort((a, b) =>
+                    a.login.toLowerCase().localeCompare(b.login.toLowerCase()),
+                );
+                setAccounts(sorted);
+                setErrors(res.errors ?? []);
+                setTruncated(res.truncated ?? false);
+                setUnauthorized(res.unauthorized ?? false);
+                setLoading(false);
+            })
+            .catch((err) => {
+                if (cancelled) {
+                    return;
+                }
+                setErrors([String(err)]);
+                setLoading(false);
+            });
         return () => {
             cancelled = true;
         };
@@ -76,6 +92,14 @@ export function ImportFollowingModal({
         }
     };
 
+    const errorBanner = errors.length > 0 && (
+        <div className="error banner">
+            {errors.map((err) => (
+                <div key={err}>{err}</div>
+            ))}
+        </div>
+    );
+
     return (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Import from GitHub">
             <div className="modal">
@@ -87,10 +111,27 @@ export function ImportFollowingModal({
                 </header>
                 {loading ? (
                     <p className="hint empty">Loading…</p>
+                ) : unauthorized ? (
+                    <div className="error banner auth-banner">
+                        <span>Your GitHub session has expired. Re-authenticate to import your following.</span>
+                        {onReauthenticate && (
+                            <button className="secondary" onClick={onReauthenticate}>
+                                Re-authenticate
+                            </button>
+                        )}
+                    </div>
                 ) : accounts.length === 0 ? (
-                    <p className="hint empty">You don't follow anyone on GitHub yet.</p>
+                    // An error that yielded no accounts shows the banner; a genuinely
+                    // empty following list shows the friendly empty state.
+                    errorBanner || <p className="hint empty">You don't follow anyone on GitHub yet.</p>
                 ) : (
                     <>
+                        {errorBanner}
+                        {truncated && (
+                            <p className="hint">
+                                You follow a lot of people — not all of them are shown.
+                            </p>
+                        )}
                         <Input
                             className="import-search"
                             placeholder="Search GitHub following"
