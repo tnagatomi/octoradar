@@ -6,6 +6,10 @@ export function AddUser(arg1) {
   return window['go']['main']['App']['AddUser'](arg1);
 }
 
+export function AddUsers(arg1) {
+  return window['go']['main']['App']['AddUsers'](arg1);
+}
+
 export function CancelDeviceLogin() {
   return window['go']['main']['App']['CancelDeviceLogin']();
 }
@@ -16,6 +20,10 @@ export function CompleteDeviceLogin(arg1, arg2, arg3) {
 
 export function FetchFeed() {
   return window['go']['main']['App']['FetchFeed']();
+}
+
+export function FetchGitHubFollowing() {
+  return window['go']['main']['App']['FetchGitHubFollowing']();
 }
 
 export function FetchTrending(arg1, arg2) {

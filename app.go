@@ -54,6 +54,9 @@ type Settings struct {
 	HasToken bool     `json:"hasToken"`
 	Login    string   `json:"login"`
 	Users    []string `json:"users"`
+	// MaxUsers is the cap on the follow list, surfaced so the UI can show the
+	// remaining slots (e.g. "21/50") without duplicating the constant.
+	MaxUsers int `json:"maxUsers"`
 }
 
 // Version returns the application version shown in the UI.
@@ -77,6 +80,7 @@ func (a *App) settingsLocked() Settings {
 		HasToken: a.cfg.Token != "",
 		Login:    a.cfg.Login,
 		Users:    users,
+		MaxUsers: maxUsers,
 	}
 }
 
@@ -232,6 +236,50 @@ func (a *App) AddUser(username string) (Settings, error) {
 	return a.settingsLocked(), nil
 }
 
+// AddUsers adds several usernames to the followed list in one shot, used by
+// the "Import from GitHub" flow. Unlike AddUser it skips the per-user
+// existence check: the names come straight from the viewer's GitHub following
+// list, so they are known to exist, and verifying each would waste a request.
+// Names are normalized and de-duplicated case-insensitively against the
+// current list and one another. The whole batch is rejected if it would push
+// the list past maxUsers; the frontend blocks this beforehand, so reaching it
+// signals a desync rather than ordinary input.
+func (a *App) AddUsers(usernames []string) (Settings, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(a.cfg.Users))
+	for _, u := range a.cfg.Users {
+		seen[strings.ToLower(u)] = struct{}{}
+	}
+	var toAdd []string
+	for _, u := range usernames {
+		u = normalizeUsername(u)
+		if u == "" {
+			continue
+		}
+		key := strings.ToLower(u)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		toAdd = append(toAdd, u)
+	}
+	if len(toAdd) == 0 {
+		return a.settingsLocked(), nil
+	}
+	if len(a.cfg.Users)+len(toAdd) > maxUsers {
+		return a.settingsLocked(), fmt.Errorf("you can follow up to %d users", maxUsers)
+	}
+
+	a.cfg.Users = append(a.cfg.Users, toAdd...)
+	slices.Sort(a.cfg.Users)
+	if err := a.cfg.Save(); err != nil {
+		return a.settingsLocked(), err
+	}
+	return a.settingsLocked(), nil
+}
+
 // RemoveUser drops the username from the followed list.
 func (a *App) RemoveUser(username string) (Settings, error) {
 	a.mu.Lock()
@@ -300,6 +348,48 @@ func (a *App) MarkReactionsRead() {
 	defer a.notifMu.Unlock()
 	notifications.MarkRead(a.notif)
 	_ = a.notif.Save()
+}
+
+// FollowingAccount is one GitHub account the viewer follows, as shown in the
+// import picker.
+type FollowingAccount struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatarUrl"`
+}
+
+// FollowingResult is the import picker's view of the viewer's GitHub following.
+// Truncated reports that the safety valve stopped the fetch short; Errors and
+// Unauthorized mirror feed.Result so a partial or failed fetch degrades the
+// same way the feed does.
+type FollowingResult struct {
+	Accounts     []FollowingAccount `json:"accounts"`
+	Truncated    bool               `json:"truncated"`
+	Errors       []string           `json:"errors"`
+	Unauthorized bool               `json:"unauthorized"`
+}
+
+// FetchGitHubFollowing returns the accounts the authenticated user follows on
+// GitHub, for the import picker. A partial fetch still returns whatever was
+// gathered alongside an error; a 401 sets Unauthorized so the UI can prompt a
+// re-auth instead of showing a raw error.
+func (a *App) FetchGitHubFollowing() FollowingResult {
+	a.mu.Lock()
+	token := a.cfg.Token
+	a.mu.Unlock()
+
+	accounts, truncated, err := github.NewClient(token).Following(a.ctx)
+	res := FollowingResult{Truncated: truncated, Accounts: []FollowingAccount{}, Errors: []string{}}
+	for _, acc := range accounts {
+		res.Accounts = append(res.Accounts, FollowingAccount{Login: acc.Login, AvatarURL: acc.AvatarURL})
+	}
+	if err != nil {
+		if github.IsUnauthorized(err) {
+			res.Unauthorized = true
+		} else {
+			res.Errors = append(res.Errors, err.Error())
+		}
+	}
+	return res
 }
 
 // FetchTrending retrieves trending repositories for the given period and
