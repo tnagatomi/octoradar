@@ -1,6 +1,7 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {FetchGitHubFollowing} from '../../wailsjs/go/main/App';
 import {main} from '../../wailsjs/go/models';
+import {Input} from '../Input';
 
 // Modal that lists the accounts the viewer follows on GitHub so they can be
 // imported into the follow list. Mounting it opens it; it fetches the following
@@ -8,6 +9,7 @@ import {main} from '../../wailsjs/go/models';
 export function ImportFollowingModal({onClose}: {onClose: () => void}) {
     const [accounts, setAccounts] = useState<main.FollowingAccount[]>([]);
     const [loading, setLoading] = useState(true);
+    const [query, setQuery] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -26,6 +28,14 @@ export function ImportFollowingModal({onClose}: {onClose: () => void}) {
         };
     }, []);
 
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (q === '') {
+            return accounts;
+        }
+        return accounts.filter((acc) => acc.login.toLowerCase().includes(q));
+    }, [accounts, query]);
+
     return (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Import from GitHub">
             <div className="modal">
@@ -40,14 +50,22 @@ export function ImportFollowingModal({onClose}: {onClose: () => void}) {
                 ) : accounts.length === 0 ? (
                     <p className="hint empty">You don't follow anyone on GitHub yet.</p>
                 ) : (
-                    <ul className="import-list">
-                        {accounts.map((acc) => (
-                            <li key={acc.login}>
-                                <img className="avatar" src={acc.avatarUrl} alt="" />
-                                <span className="import-login">{acc.login}</span>
-                            </li>
-                        ))}
-                    </ul>
+                    <>
+                        <Input
+                            className="import-search"
+                            placeholder="Search GitHub following"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                        />
+                        <ul className="import-list">
+                            {filtered.map((acc) => (
+                                <li key={acc.login}>
+                                    <img className="avatar" src={acc.avatarUrl} alt="" />
+                                    <span className="import-login">{acc.login}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </>
                 )}
             </div>
         </div>

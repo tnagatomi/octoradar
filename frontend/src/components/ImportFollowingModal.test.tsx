@@ -1,5 +1,6 @@
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import {render, screen, within} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {ImportFollowingModal} from './ImportFollowingModal';
 
 vi.mock('../../wailsjs/go/main/App', () => ({
@@ -59,5 +60,26 @@ describe('ImportFollowingModal', () => {
         render(<ImportFollowingModal onClose={() => {}} />);
 
         expect(await screen.findByText(/don't follow anyone/i)).toBeInTheDocument();
+    });
+
+    it('filters the list by the search query, case-insensitively', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'Andrew', avatarUrl: 'https://avatars/andrew'},
+                    {login: 'zoe', avatarUrl: 'https://avatars/zoe'},
+                ],
+            }),
+        );
+
+        render(<ImportFollowingModal onClose={() => {}} />);
+        await screen.findAllByRole('listitem');
+
+        await userEvent.type(screen.getByPlaceholderText(/search/i), 'an');
+
+        const items = screen.getAllByRole('listitem');
+        expect(items).toHaveLength(1);
+        expect(within(items[0]).getByText('Andrew')).toBeInTheDocument();
     });
 });
