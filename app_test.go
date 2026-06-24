@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/tnagatomi/octoradar/internal/config"
@@ -28,6 +30,74 @@ func TestGetSettingsExposesLogin(t *testing.T) {
 	}
 	if s.Login != "alice" {
 		t.Errorf("Login = %q, want alice", s.Login)
+	}
+	if s.MaxUsers != maxUsers {
+		t.Errorf("MaxUsers = %d, want %d", s.MaxUsers, maxUsers)
+	}
+}
+
+func TestAddUsersAppendsAndSorts(t *testing.T) {
+	redirectHome(t)
+
+	a := &App{cfg: &config.Config{Token: "gho_secret", Login: "alice", Users: []string{"bob"}}}
+
+	s, err := a.AddUsers([]string{"carol", "dave"})
+	if err != nil {
+		t.Fatalf("AddUsers: %v", err)
+	}
+	if want := []string{"bob", "carol", "dave"}; !slices.Equal(s.Users, want) {
+		t.Errorf("Users = %v, want %v", s.Users, want)
+	}
+}
+
+func TestAddUsersDeduplicates(t *testing.T) {
+	redirectHome(t)
+
+	a := &App{cfg: &config.Config{Token: "t", Users: []string{"bob"}}}
+
+	// "BOB" duplicates the existing entry case-insensitively; "carol" appears
+	// twice in the input and "@dave" carries a leading @. The result keeps one
+	// of each, normalized.
+	s, err := a.AddUsers([]string{"BOB", "carol", "Carol", "@dave"})
+	if err != nil {
+		t.Fatalf("AddUsers: %v", err)
+	}
+	if want := []string{"bob", "carol", "dave"}; !slices.Equal(s.Users, want) {
+		t.Errorf("Users = %v, want %v", s.Users, want)
+	}
+}
+
+func TestAddUsersRejectsWhenOverCap(t *testing.T) {
+	redirectHome(t)
+
+	existing := make([]string, maxUsers-1)
+	for i := range existing {
+		existing[i] = fmt.Sprintf("u%03d", i)
+	}
+	a := &App{cfg: &config.Config{Token: "t", Users: existing}}
+
+	// One slot remains, but two new users are offered: the whole batch is
+	// rejected and nothing is added.
+	_, err := a.AddUsers([]string{"newa", "newb"})
+	if err == nil {
+		t.Fatal("AddUsers returned nil error, want a cap error")
+	}
+	if got := len(a.cfg.Users); got != maxUsers-1 {
+		t.Errorf("Users length = %d, want %d (nothing added)", got, maxUsers-1)
+	}
+}
+
+func TestAddUsersEmptyInputNoop(t *testing.T) {
+	redirectHome(t)
+
+	a := &App{cfg: &config.Config{Token: "t", Users: []string{"bob"}}}
+
+	s, err := a.AddUsers([]string{"", "  ", "@"})
+	if err != nil {
+		t.Fatalf("AddUsers: %v", err)
+	}
+	if len(s.Users) != 1 || s.Users[0] != "bob" {
+		t.Errorf("Users = %v, want [bob]", s.Users)
 	}
 }
 

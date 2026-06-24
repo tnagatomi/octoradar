@@ -54,6 +54,9 @@ type Settings struct {
 	HasToken bool     `json:"hasToken"`
 	Login    string   `json:"login"`
 	Users    []string `json:"users"`
+	// MaxUsers is the cap on the follow list, surfaced so the UI can show the
+	// remaining slots (e.g. "21/50") without duplicating the constant.
+	MaxUsers int `json:"maxUsers"`
 }
 
 // Version returns the application version shown in the UI.
@@ -77,6 +80,7 @@ func (a *App) settingsLocked() Settings {
 		HasToken: a.cfg.Token != "",
 		Login:    a.cfg.Login,
 		Users:    users,
+		MaxUsers: maxUsers,
 	}
 }
 
@@ -225,6 +229,50 @@ func (a *App) AddUser(username string) (Settings, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfg.Users = append(a.cfg.Users, username)
+	slices.Sort(a.cfg.Users)
+	if err := a.cfg.Save(); err != nil {
+		return a.settingsLocked(), err
+	}
+	return a.settingsLocked(), nil
+}
+
+// AddUsers adds several usernames to the followed list in one shot, used by
+// the "Import from GitHub" flow. Unlike AddUser it skips the per-user
+// existence check: the names come straight from the viewer's GitHub following
+// list, so they are known to exist, and verifying each would waste a request.
+// Names are normalized and de-duplicated case-insensitively against the
+// current list and one another. The whole batch is rejected if it would push
+// the list past maxUsers; the frontend blocks this beforehand, so reaching it
+// signals a desync rather than ordinary input.
+func (a *App) AddUsers(usernames []string) (Settings, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(a.cfg.Users))
+	for _, u := range a.cfg.Users {
+		seen[strings.ToLower(u)] = struct{}{}
+	}
+	var toAdd []string
+	for _, u := range usernames {
+		u = normalizeUsername(u)
+		if u == "" {
+			continue
+		}
+		key := strings.ToLower(u)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		toAdd = append(toAdd, u)
+	}
+	if len(toAdd) == 0 {
+		return a.settingsLocked(), nil
+	}
+	if len(a.cfg.Users)+len(toAdd) > maxUsers {
+		return a.settingsLocked(), fmt.Errorf("you can follow up to %d users", maxUsers)
+	}
+
+	a.cfg.Users = append(a.cfg.Users, toAdd...)
 	slices.Sort(a.cfg.Users)
 	if err := a.cfg.Save(); err != nil {
 		return a.settingsLocked(), err

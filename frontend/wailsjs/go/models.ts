@@ -175,6 +175,7 @@ export namespace main {
 	    hasToken: boolean;
 	    login: string;
 	    users: string[];
+	    maxUsers: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -185,6 +186,7 @@ export namespace main {
 	        this.hasToken = source["hasToken"];
 	        this.login = source["login"];
 	        this.users = source["users"];
+	        this.maxUsers = source["maxUsers"];
 	    }
 	}
 

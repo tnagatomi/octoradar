@@ -6,6 +6,10 @@ export function AddUser(arg1) {
   return window['go']['main']['App']['AddUser'](arg1);
 }
 
+export function AddUsers(arg1) {
+  return window['go']['main']['App']['AddUsers'](arg1);
+}
+
 export function CancelDeviceLogin() {
   return window['go']['main']['App']['CancelDeviceLogin']();
 }
