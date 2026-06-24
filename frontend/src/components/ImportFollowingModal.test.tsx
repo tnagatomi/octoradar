@@ -35,7 +35,7 @@ describe('ImportFollowingModal', () => {
             }),
         );
 
-        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
 
         const items = await screen.findAllByRole('listitem');
         expect(items).toHaveLength(2);
@@ -48,7 +48,7 @@ describe('ImportFollowingModal', () => {
     it('shows a loading state while the fetch is in flight', () => {
         mockFollowing.mockReturnValue(new Promise(() => {}) as ReturnType<typeof FetchGitHubFollowing>);
 
-        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
 
         expect(screen.getByText(/loading/i)).toBeInTheDocument();
         expect(screen.queryAllByRole('listitem')).toHaveLength(0);
@@ -57,7 +57,7 @@ describe('ImportFollowingModal', () => {
     it('shows an empty state when you do not follow anyone on GitHub', async () => {
         mockFollowing.mockResolvedValue(result({accounts: []}));
 
-        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
 
         expect(await screen.findByText(/don't follow anyone/i)).toBeInTheDocument();
     });
@@ -72,7 +72,7 @@ describe('ImportFollowingModal', () => {
             }),
         );
 
-        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn().mockResolvedValue(true)} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn().mockResolvedValue(true)} users={[]} maxUsers={50} />);
         await screen.findAllByRole('listitem');
 
         const add = screen.getByRole('button', {name: /^add/i});
@@ -97,7 +97,7 @@ describe('ImportFollowingModal', () => {
         const onAddUsers = vi.fn().mockResolvedValue(true);
         const onClose = vi.fn();
 
-        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} />);
+        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} users={[]} maxUsers={50} />);
         await screen.findAllByRole('listitem');
 
         await userEvent.click(screen.getByRole('checkbox', {name: 'zoe'}));
@@ -114,7 +114,7 @@ describe('ImportFollowingModal', () => {
         const onAddUsers = vi.fn().mockResolvedValue(false);
         const onClose = vi.fn();
 
-        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} />);
+        render(<ImportFollowingModal onClose={onClose} onAddUsers={onAddUsers} users={[]} maxUsers={50} />);
         await screen.findAllByRole('listitem');
 
         await userEvent.click(screen.getByRole('checkbox', {name: 'amy'}));
@@ -122,6 +122,78 @@ describe('ImportFollowingModal', () => {
 
         expect(onAddUsers).toHaveBeenCalledWith(['amy']);
         expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('grays out and disables accounts already followed, case-insensitively', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'bob', avatarUrl: 'https://avatars/bob'},
+                ],
+            }),
+        );
+
+        render(
+            <ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={['BOB']} maxUsers={50} />,
+        );
+        await screen.findAllByRole('listitem');
+
+        expect(screen.getByRole('checkbox', {name: /bob/i})).toBeDisabled();
+        expect(screen.getByRole('checkbox', {name: 'amy'})).toBeEnabled();
+        expect(screen.getByText('Following')).toBeInTheDocument();
+    });
+
+    it('shows the running count out of the cap and updates it as you select', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'carol', avatarUrl: 'https://avatars/carol'},
+                ],
+            }),
+        );
+
+        render(
+            <ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={['bob']} maxUsers={50} />,
+        );
+        await screen.findAllByRole('listitem');
+
+        expect(screen.getByText('1/50')).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'amy'}));
+        expect(screen.getByText('2/50')).toBeInTheDocument();
+    });
+
+    it('blocks selecting past the remaining slots', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'dave', avatarUrl: 'https://avatars/dave'},
+                    {login: 'eve', avatarUrl: 'https://avatars/eve'},
+                ],
+            }),
+        );
+
+        // cap 3, two slots already taken => one remaining.
+        render(
+            <ImportFollowingModal
+                onClose={() => {}}
+                onAddUsers={vi.fn()}
+                users={['bob', 'carol']}
+                maxUsers={3}
+            />,
+        );
+        await screen.findAllByRole('listitem');
+
+        await userEvent.click(screen.getByRole('checkbox', {name: 'amy'}));
+
+        // The single slot is now spoken for: the other unselected rows lock.
+        expect(screen.getByRole('checkbox', {name: 'dave'})).toBeDisabled();
+        expect(screen.getByRole('checkbox', {name: 'eve'})).toBeDisabled();
+        // The selected one stays enabled so it can be unchecked.
+        expect(screen.getByRole('checkbox', {name: 'amy'})).toBeEnabled();
     });
 
     it('filters the list by the search query, case-insensitively', async () => {
@@ -135,7 +207,7 @@ describe('ImportFollowingModal', () => {
             }),
         );
 
-        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} />);
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
         await screen.findAllByRole('listitem');
 
         await userEvent.type(screen.getByPlaceholderText(/search/i), 'an');

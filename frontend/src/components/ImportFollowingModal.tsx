@@ -10,9 +10,13 @@ import {Input} from '../Input';
 export function ImportFollowingModal({
     onClose,
     onAddUsers,
+    users,
+    maxUsers,
 }: {
     onClose: () => void;
     onAddUsers: (logins: string[]) => Promise<boolean>;
+    users: string[];
+    maxUsers: number;
 }) {
     const [accounts, setAccounts] = useState<main.FollowingAccount[]>([]);
     const [loading, setLoading] = useState(true);
@@ -43,6 +47,16 @@ export function ImportFollowingModal({
         }
         return accounts.filter((acc) => acc.login.toLowerCase().includes(q));
     }, [accounts, query]);
+
+    // Logins already in the follow list, lower-cased to match GitHub's
+    // case-insensitive identity (mirrors AddUsers on the backend).
+    const followed = useMemo(() => new Set(users.map((u) => u.toLowerCase())), [users]);
+    const isFollowed = (login: string) => followed.has(login.toLowerCase());
+
+    // Slots used = current follows plus what is staged for import. Once it hits
+    // the cap, unselected rows lock so the picker never stages more than fits.
+    const used = users.length + selected.size;
+    const atCap = used >= maxUsers;
 
     const toggle = (login: string) => {
         setSelected((prev) => {
@@ -84,21 +98,30 @@ export function ImportFollowingModal({
                             onChange={(e) => setQuery(e.target.value)}
                         />
                         <ul className="import-list">
-                            {filtered.map((acc) => (
-                                <li key={acc.login}>
-                                    <label className="import-row">
-                                        <input
-                                            type="checkbox"
-                                            checked={selected.has(acc.login)}
-                                            onChange={() => toggle(acc.login)}
-                                        />
-                                        <img className="avatar" src={acc.avatarUrl} alt="" />
-                                        <span className="import-login">{acc.login}</span>
-                                    </label>
-                                </li>
-                            ))}
+                            {filtered.map((acc) => {
+                                const followedAlready = isFollowed(acc.login);
+                                const checked = followedAlready || selected.has(acc.login);
+                                return (
+                                    <li key={acc.login}>
+                                        <label className={followedAlready ? 'import-row followed' : 'import-row'}>
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                disabled={followedAlready || (atCap && !selected.has(acc.login))}
+                                                onChange={() => toggle(acc.login)}
+                                            />
+                                            <img className="avatar" src={acc.avatarUrl} alt="" />
+                                            <span className="import-login">{acc.login}</span>
+                                            {followedAlready && <span className="import-tag">Following</span>}
+                                        </label>
+                                    </li>
+                                );
+                            })}
                         </ul>
                         <footer className="modal-footer">
+                            <span className="import-count">
+                                {used}/{maxUsers}
+                            </span>
                             <button type="button" onClick={add} disabled={selected.size === 0}>
                                 Add {selected.size}
                             </button>
