@@ -249,6 +249,49 @@ describe('ImportFollowingModal', () => {
         expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     });
 
+    it('shows a nothing-to-import message when the search matches no accounts', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'zoe', avatarUrl: 'https://avatars/zoe'},
+                ],
+            }),
+        );
+
+        render(<ImportFollowingModal onClose={() => {}} onAddUsers={vi.fn()} users={[]} maxUsers={50} />);
+        await screen.findAllByRole('listitem');
+
+        await userEvent.type(screen.getByPlaceholderText(/search/i), 'zzznomatch');
+
+        expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+        expect(screen.getByText(/no accounts to import/i)).toBeInTheDocument();
+    });
+
+    it('shows the nothing-to-import message when everyone is already followed', async () => {
+        mockFollowing.mockResolvedValue(
+            result({
+                accounts: [
+                    {login: 'amy', avatarUrl: 'https://avatars/amy'},
+                    {login: 'zoe', avatarUrl: 'https://avatars/zoe'},
+                ],
+            }),
+        );
+
+        render(
+            <ImportFollowingModal
+                onClose={() => {}}
+                onAddUsers={vi.fn()}
+                users={['amy', 'zoe']}
+                maxUsers={50}
+            />,
+        );
+        // The accounts still render (grayed, tagged Following)…
+        await screen.findAllByRole('listitem');
+        // …but the message makes clear there is nothing new to pick.
+        expect(screen.getByText(/no accounts to import/i)).toBeInTheDocument();
+    });
+
     it('filters the list by the search query, case-insensitively', async () => {
         mockFollowing.mockResolvedValue(
             result({

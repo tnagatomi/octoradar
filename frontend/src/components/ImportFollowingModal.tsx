@@ -92,6 +92,11 @@ export function ImportFollowingModal({
         }
     };
 
+    // True when the current view offers nothing to pick: either the search
+    // matched nothing, or every shown account is already followed. Drives a
+    // single message so the list area is never a confusing blank.
+    const nothingToImport = !filtered.some((acc) => !isFollowed(acc.login));
+
     const errorBanner = errors.length > 0 && (
         <div className="error banner">
             {errors.map((err) => (
@@ -159,6 +164,7 @@ export function ImportFollowingModal({
                                 );
                             })}
                         </ul>
+                        {nothingToImport && <p className="hint empty">No accounts to import.</p>}
                         <footer className="modal-footer">
                             <span className="import-count">
                                 {used}/{maxUsers}
