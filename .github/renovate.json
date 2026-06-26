@@ -9,6 +9,8 @@
   "semanticCommitScope": null,
   "minimumReleaseAge": "7 days",
   "internalChecksFilter": "strict",
+  "timezone": "Asia/Tokyo",
+  "schedule": ["after 5am and before 6am on saturday"],
   "packageRules": [
     {
       "description": "Keep the Go toolchain version in go.mod up to date",
